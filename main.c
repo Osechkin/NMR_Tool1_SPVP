@@ -1,34 +1,12 @@
-// NMR Tool software
-// 3.06.2014
-//current version 0.02
+// NMR SPVP Logging Tool software
+// 13.02.2021
+//current version 0.1
 
 #include <ti/pspiom/cslr/cslr.h>
 #include "upp/upp.h"
 #include "proger/proger.h"
 #include "uart_hduplex/uart_hduplex.h"
 #include "spi/spi.h"
-
-
-#define USE_DIELEC_UART
-//#define DEBUG_DIELEC_UART
-//#define DEBUG_DIELEC_UART_BY_PULSEPROG
-//#define DEBUG_CURRENT_POINT
-//#define DEBUG_CURRENT_POINT2
-//#define DEBUG_PROGER
-//#define DEBUG_GPIO_STATES
-//#define DEBUG_ADC_FRQ_READ
-//#define DEBUG_GPIO_13
-//#define DEBUG_GPIO_15
-//#define DEBUG_GAMMA_COUNTER
-//#define USE_TIMING
-//#define DEBUG_POWER_GOOD
-//#define DEBUG_TIME_COUNTER
-#define USE_TELEMETRIC_UART
-//#define DEBUG_TELEMETRIC
-//#define DEBUG_SPI
-//#define DEBUG_READCONF
-//#define DEBUG_READ_PROGER_STATUS
-//#define DEBUG_READ_PROGER_CONN_SPD
 
 //----------------------------------------------
 #include <stdio.h>
@@ -59,6 +37,35 @@
 #include "Math/data_processing.h"
 
 #include "time.h"
+
+
+
+//#define USE_DIELEC_UART
+//#define DEBUG_DIELEC_UART
+//#define DEBUG_PROGER
+//#define DEBUG_GPIO_STATES
+//#define DEBUG_ADC_FRQ_READ
+//#define DEBUG_GAMMA_COUNTER
+//#define USE_TIMING
+//#define DEBUG_POWER_GOOD
+//#define DEBUG_TIME_COUNTER
+#define USE_TELEMETRIC_UART
+//#define DEBUG_TELEMETRIC
+//#define DEBUG_SPI
+//#define DEBUG_READCONF
+//#define DEBUG_READ_PROGER_STATUS
+//#define DEBUG_READ_PROGER_CONN_SPD
+#define USE_PRESSURE_UNIT
+
+#define INTC_Timer			4
+#define INTC_UART			5
+#define INTC_UPP			6
+#define INTC_GPIO			7
+#ifdef USE_TELEMETRIC_UART
+#define INTC_UART_Tele		8
+#endif
+
+
 
 #pragma DATA_SECTION(upp_buffer_page1, "l2ram_data");		// 4096
 #pragma DATA_SECTION(data_org, "l2ram_data");				// 8192 + 2*PAD
@@ -126,7 +133,7 @@ static volatile unsigned int upp_isr_count = 0;
 volatile Bool modulesEnabled;
 volatile unsigned int pins_reg = 0, pins_reg_prev = 0;
 volatile uint8_t pins_cmd = 0xFF, led_pin15 = 0;
-//static int pos = 0;
+
 
 volatile unsigned int device_serial = 0;
 ToolChannel *device_channels = NULL;
@@ -301,6 +308,8 @@ int free_index = 0;
 
 Data_Cmd *instr = 0;
 
+
+
 void main(void)
 {
 #ifdef USE_TIMING
@@ -315,9 +324,24 @@ void main(void)
 	disableARM();
 	_disable_interrupts();
 
-	// ********** Init Devices ********** //
+	// ********** Init Devices ************************************************ //
 	create_Clockers();
 
+
+	//_enable_interrupts(); // ??? should be _disable_interrupts(); I think??? (aivanov)
+
+	// Timer initialization ---------------------------------------------------
+	timerSettings.freq = 24000u;
+	timerSettings.enabled = False;
+
+	tmrRegs = tmr0Regs; 									// add Timer0 to application
+
+	setup_Timer(tmrRegs, timerSettings);										printf("System timer was initialized.\n");
+	setup_Timer_INTC(tmrRegs, INTC_Timer);										printf("Timer system interrupt was mapped to DSP INT%d.\n", INTC_Timer);
+	// ------------------------------------------------------------------------
+
+
+	// UART initialization ----------------------------------------------------
 	uartSettings.BaudRate = 115200;
 	uartSettings.DataBits = 8;
 	uartSettings.StopBits = 1;
@@ -328,7 +352,13 @@ void main(void)
 
 	uartRegs = uart1Regs; 									// add UART1 to application (for BigGreenBoard #1 - UART1 is for communication board)
 
-	// Dielectric Board UART settings
+	reset_UART(uartRegs);
+	setup_UART(uartRegs, uartSettings);											printf("UART1 was initialized.\n");
+	setup_UART_INTC(uartRegs, INTC_UART);										printf("UART1 system interrupt was mapped to DSP INT%d.\n", INTC_UART);
+	// ------------------------------------------------------------------------
+
+
+	// Dielectric Board UART initialization -----------------------------------
 #ifdef USE_DIELEC_UART
 	uartSettings_Dielec.BaudRate = 19200;
 	uartSettings_Dielec.DataBits = 8;
@@ -339,8 +369,16 @@ void main(void)
 	uartSettings_Dielec.FIFOLen = 1;
 
 	uartRegs_Dielec = uart0Regs; 							// (for BigGreenBoard #1 - UART0 is for Dielectric)
-#endif
 
+	reset_UART(uartRegs_Dielec);
+	setup_UART(uartRegs_Dielec, uartSettings_Dielec);
+	setup_UART_INTC(uartRegs_Dielec, 9);
+	memset(dielec_data, 0x00, DIELECTR_DATA_LEN * sizeof(uint8_t)); //array for input data
+#endif
+	// ------------------------------------------------------------------------
+
+
+	// Telemetric Board UART initialization -----------------------------------
 #ifdef USE_TELEMETRIC_UART
 	uartSettings_Telemetric.BaudRate = 19200;
 	uartSettings_Telemetric.DataBits = 8;
@@ -351,55 +389,31 @@ void main(void)
 	uartSettings_Telemetric.FIFOLen = 1;
 
 	uartRegs_Telemetric = uart2Regs;
-#endif
 
-	timerSettings.freq = 24000u;
-	timerSettings.enabled = False;
-
-	tmrRegs = tmr0Regs; 									// add Timer0 to application
-
-	//_enable_interrupts(); // ??? should be _disable_interrupts(); I think??? (aivanov)
-#ifndef DEBUG_DIELEC_UART
-	setup_Timer(tmrRegs, timerSettings);
-	setup_Timer_INTC(tmrRegs, 4);
-#endif
-
-	reset_UART(uartRegs);
-	setup_UART(uartRegs, uartSettings);
-	setup_UART_INTC(uartRegs, 5);
-
-	// Dielectric Board UART initialization
-#ifdef USE_DIELEC_UART
-	reset_UART(uartRegs_Dielec);
-	setup_UART(uartRegs_Dielec, uartSettings_Dielec);
-	setup_UART_INTC(uartRegs_Dielec, 7);
-	memset(dielec_data, 0x00, DIELECTR_DATA_LEN * sizeof(uint8_t)); //array for input data
-#endif
-
-	// Dielectric Board UART initialization
-#ifdef USE_TELEMETRIC_UART
 	reset_UART(uartRegs_Telemetric);
-	setup_UART(uartRegs_Telemetric, uartSettings_Telemetric);
-	setup_UART_INTC(uartRegs_Telemetric, 8);
+	setup_UART(uartRegs_Telemetric, uartSettings_Telemetric);					printf("UART2 was initialized for the Telemetric board.\n");
+	setup_UART_INTC(uartRegs_Telemetric, INTC_UART_Tele);						printf("UART2 system interrupt was mapped to DSP INT%d.\n", INTC_UART_Tele);
 #endif
+	// ------------------------------------------------------------------------
 
-	// Interrupts for Dielectric Board
+
+	// Enable all Interrupts --------------------------------------------------
 	int *INTCs = (int*) calloc(5, sizeof(int));
-	INTCs[0] = 4; 											// int 4 added for Timer0
-	INTCs[1] = 5; 											// int 5 added for Logging UART
-	INTCs[2] = 6; 											// int 6 added for UPP
-	INTCs[3] = 7; 											// int 7 added for Dielectric UART
-	INTCs[4] = 8; 											// int 8 added for Telemetric UART
+	INTCs[0] = INTC_Timer; 					// int 4 added for Timer0
+	INTCs[1] = INTC_UART; 					// int 5 added for Logging UART
+	INTCs[2] = INTC_UPP; 					// int 6 added for UPP
+	INTCs[3] = INTC_GPIO; 					// int 7 added for GPIO
+	INTCs[4] = INTC_UART_Tele; 				// int 8 added for Telemetric UART
 	enable_all_INTC(5, INTCs);
+	// ------------------------------------------------------------------------
 
+
+	// Enable devices ---------------------------------------------------------
 #ifndef DEBUG_DIELEC_UART
 	timerSettings.enabled = True;
 	enable_Timer(tmrRegs);
 #endif
 	enable_UART(uartRegs);
-
-
-	//write_data_UART(uartRegs, );
 
 #ifdef USE_DIELEC_UART
 	enable_UART(uartRegs_Dielec); 							// start operations on Dielectric UART
@@ -421,6 +435,8 @@ void main(void)
 	GPIODirModeSet(SOC_GPIO_0_REGS, 3, GPIO_DIR_INPUT);		// Sets the pin 2( GP0[2] )
 	GPIODirModeSet(SOC_GPIO_0_REGS, 4, GPIO_DIR_INPUT);		// Sets the pin 3( GP0[3] )
 #endif
+	// ------------------------------------------------------------------------
+
 #ifdef USE_DIELEC_UART
 	init_uart_hduplex_pins(); 								// control pins initialization
 #endif
@@ -430,219 +446,21 @@ void main(void)
 #endif
 
 
-	// init device settings
+	// init device settings ---------------------------------------------------
 	proger_stop();
 	device_serial = proger_rd_device_serial();
 	initDeviceSettings(device_serial);
 
 	main_proger_wr_pulseprog_default();
-
-#ifdef DEBUG_PROGER
-	while(1)
-	{
-		proger_stop();
-		main_proger_wr_pulseprog_test_GPIO_49q_ADC_old_style_windows (
-				0, 											// double resonance_frq_ofs_hz,
-				100,										// unsigned int rf_pulse_duration,
-				100*20,										// unsigned int nmr_aq_time,
-				100*20,										// unsigned int noise_aq_time,
-				100,										// unsigned int dead_time,
-				500000,										// double adc_frq_ofs_hz,
-				10,											// unsigned int damping_pulse_duration_after_rf_pulse,
-				10000);										// unsigned int delay_before_rf_pulses
-		proger_start();
-		dummyDelay(1000);
-	};
-#endif
-
-#ifdef DEBUG_GPIO_13
-	test_GPIO();
-#endif
-
-#ifdef DEBUG_GPIO_15
-	test_GPIO_P15();
-#endif
-
-#ifdef DEBUG_GAMMA_COUNTER
-	while(1)
-	{
-		uint32_t gamma_counts = proger_rd_gamma_count();
-		//printf("%d",gamma_counts);
-		dummyDelay(4000);
-	}
-#endif
-
-#ifdef DEBUG_POWER_GOOD
-	while (1) {
-		uint32_t pg = proger_rd_pwr_pg();
-		//printf("%d", pg);
-		dummyDelay(10000);
-	}
-#endif
-
-#ifdef DEBUG_TIME_COUNTER
-	while (1)
-	{
-		proger_restart_time_counter ();
-		dummyDelay(10000);
-		volatile uint32_t time_mks = proger_read_time_counter();
-	}
-#endif
-
-#ifdef DEBUG_SPI
-	char spi_buf[128];
-	memset(spi_buf, 0x00, 12);
-	spi_flash_rd (0x780000, spi_buf, 10);
-#endif
-
-#ifdef DEBUG_READCONF
-	unsigned char conf_buf[0x20000];
-	memset(conf_buf, 0x00, 0x20000);
-	proger_rd_conf_mem ( conf_buf );
-#endif
-
-#ifdef DEBUG_READ_PROGER_STATUS
-	unsigned int pp_is_started  = 0xAA;
-	unsigned int pp_is_seq_done = 0xBB;
-
-	// check COM_STOP
-	proger_stop();
-	proger_mem_init();
-
-	pp_is_started  = proger_is_started();  //should be 0 for both
-	pp_is_seq_done = proger_is_seq_done();
+	// ------------------------------------------------------------------------
 
 
-	proger_start();
-	dummyDelay(100);
-
-	pp_is_started  = proger_is_started();  //should be 1 for both
-	pp_is_seq_done = proger_is_seq_done();
-
-	proger_stop();
-
-	pp_is_started  = proger_is_started();  //should be 0 for both
-	pp_is_seq_done = proger_is_seq_done();
-
-	pp_is_started  = 0xAA;
-	pp_is_seq_done = 0xBB;
-
-
-	// check COM_RET
-	proger_stop();
-	proger_mem_clear();
-
-	pp_is_started  = proger_is_started();  //should be 0 for both
-	pp_is_seq_done = proger_is_seq_done();
-
-	proger_start();
-	dummyDelay(100);
-
-	pp_is_started  = proger_is_started();  //should be 1
-	pp_is_seq_done = proger_is_seq_done(); //should be 0
-
-	proger_stop();
-
-	pp_is_started  = proger_is_started();  //should be 0 for both
-	pp_is_seq_done = proger_is_seq_done();
-
-	pp_is_started--; pp_is_seq_done--;
-
-#endif
-
-#ifdef DEBUG_READ_PROGER_CONN_SPD
-	unsigned int pp_con_spd  = 0;
-
-	pp_con_spd  = proger_rd_connect_speed();  //should be something, not 0
-
-	pp_con_spd++;
-	pp_con_spd--;
-
-#endif
-
-	//upp init
+	//upp initialization ------------------------------------------------------
 	_disable_interrupts();
 	init_upp();
 	init_upp_ints(); 										// disable for upp_check_poll usage
 	_enable_interrupts();
-
-
-	//Test Dielectric connecton
-#ifdef DEBUG_DIELEC_UART
-	while (1)
-	{
-
-		//dummyDelay(8000);// 6000~210 ms in Debug
-
-		static uint32_t UART_Dielec_launch_counter = 0;
-		UART_Dielec_launch_counter++;
-		UART_Dielec_counter = 0;
-		memset (dielec_data, 0x00, DIELECTR_DATA_LEN*sizeof(uint8_t));
-		uart_hduplex_sendchar(uartRegs_Dielec, 6);
-		uart_hduplex_sendchar(uartRegs_Dielec, 32);
-		uart_hduplex_sendchar(uartRegs_Dielec, 0);
-
-		uart_hduplex_sendchar(uartRegs_Dielec, 8);
-		uart_hduplex_sendchar(uartRegs_Dielec, 0);
-		uart_hduplex_sendchar(uartRegs_Dielec, 0);
-		dummyDelay(8000);// 6000~210 ms in Debug
-
-		uart_hduplex_sendchar(uartRegs_Dielec, 6);
-		uart_hduplex_sendchar(uartRegs_Dielec, 0);
-		uart_hduplex_sendchar(uartRegs_Dielec, 8);
-		dummyDelay(300);// 300~70 ms in Debug
-
-		uart_hduplex_sendchar(uartRegs_Dielec, 200);
-		dummyDelay(600);// 300~70 ms in Debug
-
-		dummyDelay(3000);// ~ 1 s in Debug
-	}
-
-	//uart_hduplex_sendchar(uartRegs_Dielec, 0x01);
-	while (1)
-	{
-		UART_Dielec_counter = 0;
-		memset (dielec_data, 0x00, DIELECTR_DATA_LEN*sizeof(uint8_t));
-		uart_hduplex_sendchar(uartRegs_Dielec, 6);
-		uart_hduplex_sendchar(uartRegs_Dielec, 32);
-		uart_hduplex_sendchar(uartRegs_Dielec, 0);
-
-		uart_hduplex_sendchar(uartRegs_Dielec, 8);
-		uart_hduplex_sendchar(uartRegs_Dielec, 0);
-		uart_hduplex_sendchar(uartRegs_Dielec, 0);
-		dummyDelay(6000); // ~210 ms in Debug
-
-		uart_hduplex_sendchar(uartRegs_Dielec, 6);
-		uart_hduplex_sendchar(uartRegs_Dielec, 0);
-		uart_hduplex_sendchar(uartRegs_Dielec, 8);
-		dummyDelay(300);// ~ 70 ms in Debug
-
-		uart_hduplex_sendchar(uartRegs_Dielec, 200);
-		dummyDelay(300);// ~ 70 ms in Debug
-
-		dummyDelay(3000);// ~ 1 s in Debug
-	}
-
-	while (1)
-	{
-		int i;
-		UART_Dielec_counter = 0;
-		memset (dielec_data, 0x00, DIELECTR_DATA_LEN*sizeof(uint8_t));
-
-		//int diel_len = DIELECTR_DATA_LEN/sizeof(uint16_t);
-		for (i = 0; i < 8/*diel_len*/; i++)
-		{
-			uart_hduplex_sendchar(uartRegs_Dielec, 136);
-			//uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			//uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			dummyDelay(300);// ~ 21 ms in Debug
-		}
-
-		dummyDelay(1000); // ~ 1000/8 ms in Debug
-
-	}
-#endif
-
+	// ------------------------------------------------------------------------
 
 
 #ifdef DEBUG_TELEMETRIC
@@ -723,7 +541,7 @@ void main(void)
 		dummyDelay(100000);
 	}
 #endif
-	// ********** Finish (Initialization of Devices) ***********
+	// ********** Finish (Initialization of Devices) **************************
 
 	//uint8_t simple_uart_message[128] = {'D', 'S', 'P', '_', '0', '.', '4', '9', ' ', '(', '2', '9', '.', '1', '1', '.', '1', '6', ')', '\n', 0};
 	//write_data_UART(uart1Regs, simple_uart_message, 20);
@@ -1349,12 +1167,6 @@ void main(void)
 
 				//printf("dummy = %d, ", proc_index);
 
-				//led_pin15 = ~led_pin15;
-				//if (led_pin15) P15_SET();
-				//else P15_CLR();
-
-				//P15_CLR();
-
 #ifdef USE_TIMING
 				// proc_id:
 				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
@@ -1928,84 +1740,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 
 		break;
 	}
-	/*case SDSP_REQUEST_C8:
-	case SDSP_REQUEST_88:
-	{
-		enableCacheL1();
-		//stopClocker(clocker3);
-
-		uart_hduplex_sendchar(uartRegs_Dielec, cmd);
-
-		dummyDelay(10000);
-
-		MsgHeader *hdr = out_msg.msg_header;
-		hdr->msg_type = MTYPE_SHORT;
-		hdr->reader = PC_MAIN;
-		hdr->writer = NMR_TOOL;
-		hdr->id = _msg_header->id;
-		memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
-
-		if (UART_Dielec_counter > 0)
-		{
-			int out_shift = output_data->full_size;
-			int i;
-			for (i = 0; i < UART_Dielec_counter; i++)
-			{
-				*(output_data->out_data + out_shift++) = (float)(dielec_data[i]);
-			}
-
-			int outdata_count = output_data->outdata_counter;
-			output_data->data_id[outdata_count] = DT_DIEL_ADJUST;
-			output_data->outdata_len[outdata_count] = UART_Dielec_counter;
-			output_data->full_size += UART_Dielec_counter;
-			output_data->outdata_counter++;
-
-			UART_Dielec_counter = 0;
-			sdsp_started = True;
-
-			hdr->data[0] = DIEL_DATA_READY;
-			sendShortMsg(hdr, uartRegs);
-		}
-		else
-		{
-			hdr->data[0] = DATA_FAILED;
-			sendShortMsg(hdr, uartRegs);
-		}
-		disableCache();
-
-		incom_msg_state = NOT_DEFINED;
-		tool_state = FREE;
-
-		outcom_msg_state = MESSAGE_SENT;
-		clearMsgHeader(out_msg.msg_header);
-
-		break;
-	}*/
-
-	/*case DIEL_ADJUST_START:
-	{
-		fpga_prg_started = False;
-
-		MsgHeader *hdr = out_msg.msg_header;
-		hdr->msg_type = MTYPE_SERVICE;
-		hdr->reader = PC_MAIN;
-		hdr->writer = NMR_TOOL;
-		hdr->id = _msg_header->id;
-		memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
-		hdr->data[0] = DIEL_ADJUST_START;
-
-		sendShortMsg(hdr, uartRegs);
-		outcom_msg_state = MESSAGE_SENT;
-		clearMsgHeader(out_msg.msg_header);
-
-		//tool_state = UNKNOWN_STATE;	// commented 16.03.2016
-		proger_stop();
-		stopClocker(clocker3);
-		incom_msg_state = NOT_DEFINED;
-		dielec_tool_adjustment = True;
-
-		break;
-		}*/
 	default: break;
 	}
 }
@@ -2758,6 +2492,11 @@ interrupt void upp_isr(void)
 //	printf("\n");
 }
 
+interrupt void GPIO_isr(void)
+{
+
+}
+
 interrupt void UART_Telemitric_isr(void)
 {
 	uint8_t byte;
@@ -3109,297 +2848,6 @@ void telemetryDataToOutput(OutBuffer *out_buff)
 	UART_telemetric_pack_counter = 0;
 	telemetry_ready = TELE_NOT_READY;
 }
-
-/*
-void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
-{
-	int i;
-	int index = 0;
-
-	int outdata_count = out_buff->outdata_counter;
-	int pos = 0;
-	for (i = 0; i < outdata_count; i++)
-	{
-		uint8_t data_id = out_buff->data_id[i];
-		uint16_t data_len = (uint16_t) out_buff->outdata_len[i];
-		uint16_t group_index = (uint16_t) out_buff->group_index[i];
-
-		switch (data_id)
-		{
-		case DT_SGN_SE_ORG:
-		case DT_NS_SE_ORG:
-		case DT_SGN_FID_ORG:
-		case DT_NS_FID_ORG:
-		{
-			uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(uint8_t));
-			data_fin[index++] = (uint8_t) data_id;
-			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
-			data_fin[index++] = (uint8_t) ((group_index >> 8) & 0x00FF);
-			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
-			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
-
-			if (data_len > 0)
-			{
-				int j;
-				int16_t min = (int16_t) out_buff->out_data[pos];
-				int16_t max = min;
-				for (j = 0; j < data_len; j++)
-				{
-					int16_t x = (int16_t) out_buff->out_data[j + pos];
-					if (x < min) min = x;
-					if (x > max) max = x;
-				}
-
-				float b = -min;
-				float a = (max - min) / 255.0;
-				if (a == 0) a = 1;
-				memcpy(&data_fin[index], (uint8_t*) (&a), sizeof(float));
-				index += sizeof(float);
-				memcpy(&data_fin[index], (uint8_t*) (&b), sizeof(float));
-				index += sizeof(float);
-
-				for (j = 0; j < data_len; j++)
-				{
-					int16_t x = (int16_t) out_buff->out_data[j + pos];
-					uint8_t val = (uint8_t) ((x + b) / a);
-					data_fin[j + index] = val;
-				}
-
-				pos += data_len;
-				index += data_len * sizeof(uint8_t);
-				if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
-				//if (outdata_count > 1 && i < outdata_count - 2)
-				// {
-				// data_fin[index++] = 0x53;
-				// data_fin[index++] = 0x35;
-				// }
-				data_fin_counter = index;
-			}
-
-			break;
-		}
-		case DT_SGN_SE:
-		case DT_NS_SE:
-		case DT_NS_QUAD_SE_RE:
-		case DT_NS_QUAD_SE_IM:
-		case DT_NS_QUAD_FID_RE:
-		case DT_NS_QUAD_FID_IM:
-		case DT_SGN_QUAD_SE_RE:
-		case DT_SGN_QUAD_SE_IM:
-		case DT_SGN_QUAD_FID_RE:
-		case DT_SGN_QUAD_FID_IM:
-		case DT_NS_FFT_FID_RE:
-		case DT_NS_FFT_SE_RE:
-		case DT_SGN_FFT_FID_RE:
-		case DT_SGN_FFT_SE_RE:
-		case DT_NS_FFT_FID_IM:
-		case DT_NS_FFT_SE_IM:
-		case DT_SGN_FFT_FID_IM:
-		case DT_SGN_FFT_SE_IM:
-		case DT_SGN_FFT_FID_AM:
-		case DT_NS_FFT_FID_AM:
-		case DT_SGN_FFT_SE_AM:
-		case DT_NS_FFT_SE_AM:
-		case DT_SGN_POWER_SE:
-		case DT_SGN_POWER_FID:
-		case DT_NS_POWER_SE:
-		case DT_NS_POWER_FID:
-		case DT_RFP:
-		{
-			uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(uint8_t));
-			data_fin[index++] = (uint8_t) data_id;
-			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
-			data_fin[index++] = (uint8_t) ((group_index >> 8) & 0x00FF);
-			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
-			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
-
-			if (data_len > 0)
-			{
-				int j;
-				volatile int tt = 0;
-				float min = out_buff->out_data[pos];
-				float max = min;
-				for (j = 0; j < data_len; j++)
-				{
-					float x = out_buff->out_data[j + pos];
-					if (x < min) min = x;
-					if (x > max) max = x;
-				}
-
-				float b = -min;
-				float a = (max - min) / 255.0;
-				if (a == 0) a = 1.0;
-				memcpy(&data_fin[index], (uint8_t*) (&a), sizeof(float));
-				index += sizeof(float);
-				memcpy(&data_fin[index], (uint8_t*) (&b), sizeof(float));
-				index += sizeof(float);
-
-				for (j = 0; j < data_len; j++)
-				{
-					float x = out_buff->out_data[j + pos];
-					uint8_t val = (uint8_t) ((x + b) / a);
-					data_fin[j + index] = val;
-				}
-
-				pos += data_len;
-				index += data_len * sizeof(uint8_t);
-				if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
-				//if (outdata_count > 1 && i < outdata_count - 2)
-				// {
-				// data_fin[index++] = 0x53;
-				// data_fin[index++] = 0x35;
-				// }
-				data_fin_counter = index;
-			}
-			break;
-		}
-		case DT_SGN_RELAX:
-		case DT_SGN_RELAX2:
-		case DT_SGN_RELAX3:
-		case DT_AFR1_RX:
-		case DT_AFR2_RX:
-		case DT_AFR3_RX:
-		{
-			uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(uint8_t));
-			data_fin[index++] = (uint8_t) data_id;
-			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
-			data_fin[index++] = (uint8_t) ((group_index >> 8) & 0x00FF);
-			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
-			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
-
-			if (data_len > 0)
-			{
-				int j;
-				float min = out_buff->out_data[pos];
-				float max = min;
-				for (j = 0; j < data_len; j++)
-				{
-					float x = out_buff->out_data[j + pos];
-					uint32_t *b = (uint32_t*) &x;
-					if (*b != 0xffffffff)
-					{
-						if (x < min) min = x;
-						if (x > max) max = x;
-					}
-				}
-
-				float b = -min;
-				float a = (max - min) / 254.0;
-				//if (a == 0) a = 1.0;
-				memcpy(&data_fin[index], (uint8_t*) (&a), sizeof(float));
-				index += sizeof(float);
-				memcpy(&data_fin[index], (uint8_t*) (&b), sizeof(float));
-				index += sizeof(float);
-
-				for (j = 0; j < data_len; j++)
-				{
-					float x = out_buff->out_data[j + pos];
-					uint32_t *bb = (uint32_t*) (&(out_buff->out_data[j + pos]));
-					if (*bb == 0xffffffff) 	data_fin[j + index] = 0xff;
-					else
-					{
-						if (min == max) data_fin[j + index] = 1;
-						else
-						{
-							uint8_t val = (uint8_t) ((x + b) / a);
-							data_fin[j + index] = val;
-						}
-					}
-				}
-
-				pos += data_len;
-				index += data_len * sizeof(uint8_t);
-				if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
-				//if (outdata_count > 1 && i < outdata_count - 2)
-				// {
-				// data_fin[index++] = 0x53;
-				// data_fin[index++] = 0x35;
-				// }
-				data_fin_counter = index;
-			}
-			break;
-		}
-		case DT_DIEL:
-		case DT_DIEL_ADJUST:
-		{
-			uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(float));
-			data_fin[index++] = (uint8_t) data_id;
-			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
-			data_fin[index++] = (uint8_t) ((group_index >> 8) & 0x00FF);
-			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
-			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
-
-			memcpy(&data_fin[index], (uint8_t*) (out_buff->out_data + pos), data_in_bytes);
-			pos += data_len;
-			index += data_in_bytes;
-			if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
-			//if (outdata_count > 1 && i < outdata_count - 2)
-			// {
-			// data_fin[index++] = 0x53;
-			// data_fin[index++] = 0x35;
-			// }
-			data_fin_counter = index;
-			break;
-		}
-		case DT_GAMMA:
-		{
-			uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(float));
-			data_fin[index++] = (uint8_t) data_id;
-			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
-			data_fin[index++] = (uint8_t) ((group_index >> 8) & 0x00FF);
-			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
-			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
-
-			float *gl = (float*) (out_buff->out_data + pos);
-			float bb = *gl;
-			memcpy(&data_fin[index], (uint8_t*) (out_buff->out_data + pos), data_in_bytes);
-			pos += data_len;
-			index += data_in_bytes;
-			if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
-			//if (outdata_count > 1 && i < outdata_count - 2)
-			// {
-			// data_fin[index++] = 0x53;
-			// data_fin[index++] = 0x35;
-			// }
-			data_fin_counter = index;
-
-			break;
-		}
-		case DT_DU:
-		case DT_PU:
-		case DT_TU:
-		{
-			//uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(float));
-			//uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(uint8_t));
-			uint16_t data_in_bytes = (uint16_t) (TELEMETRIC_DATA_LEN);
-			data_fin[index++] = (uint8_t) data_id;
-			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
-			data_fin[index++] = (uint8_t) ((group_index >> 8) & 0x00FF);
-			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
-			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
-
-			memcpy(&data_fin[index], (uint8_t*) (out_buff->out_data + pos), data_in_bytes);
-			pos += 3;
-			index += data_in_bytes;
-			if (outdata_count > 1 && i < outdata_count - 1)
-				data_fin[index++] = 0xFF;
-			//if (outdata_count > 1 && i < outdata_count - 2)
-			// {
-			// data_fin[index++] = 0x53;
-			// data_fin[index++] = 0x35;
-			// }
-			data_fin_counter = index;
-
-			break;
-		}
-		default: break;
-		}
-	}
-
-	SummationBuffer_ClearAll(sum_buff);
-	OutBuffer_ClearAll(out_buff);
-}
-*/
 
 void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 {
@@ -4288,12 +3736,6 @@ void executeProcPack(Data_Proc *proc, int index)
 		//free_DataProcCmd(instr);
 	}
 
-	//free_DataProcCmd(instr);
-	//if (free_index > 98) free_index = 0;
-	//free_test[free_index++] = 101;
-	//free(instr->params);
-	//free(instr);
-	//free_test[free_index++] = 111;
 }
 
 int check_stb()
