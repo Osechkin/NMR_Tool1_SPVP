@@ -40,8 +40,6 @@
 
 
 
-//#define USE_DIELEC_UART
-//#define DEBUG_DIELEC_UART
 //#define DEBUG_PROGER
 //#define DEBUG_GPIO_STATES
 //#define DEBUG_ADC_FRQ_READ
@@ -87,6 +85,7 @@
 
 extern void intcVectorTable(void);
 
+// ----------------------------------------------------------------------------
 int defineToolState(void);
 int definePinState_CmdAddr(int pinNumber, uint8_t *cmd_addr);
 void init_UART_MsgData(void);
@@ -119,15 +118,12 @@ Bool extractDataFromPacks(UART_Message *uart_msg, uint8_t *arr, uint16_t *len);
 void executeProcPack(Data_Proc *proc, int index);
 void toMeasureTemperatures();
 void setDefaultCommSettings();
-//----------------------------------------------
+//-----------------------------------------------------------------------------
 
-//----------------------------------------------
-// Dielectric tool error register
-uint32_t dielectr_error_reg = 0;
-
+//-----------------------------------------------------------------------------
 static int cnt_uart_isr = 0;
 
-//upp vars and functions
+//upp vars and functions -------------------------------------------------------
 volatile unsigned int reg1 = 0, reg2 = 0, reg3 = 0;
 unsigned short byte_count = UPP_BUFF_SIZE, line_count = 1; 	// max value for both is 64*1024-1
 volatile unsigned int upp_int_status = 0;
@@ -136,6 +132,11 @@ static volatile unsigned int upp_isr_count = 0;
 volatile Bool modulesEnabled;
 volatile unsigned int pins_reg = 0, pins_reg_prev = 0;
 volatile uint8_t pins_cmd = 0xFF, led_pin15 = 0;
+
+volatile Bool upp_resetted = false;
+
+CSL_UppRegsOvly UPP0Regs = (CSL_UppRegsOvly) (CSL_UPP_0_REGS);
+CSL_UppRegsOvly UPPRegs;
 
 
 volatile unsigned int device_serial = 0;
@@ -153,8 +154,6 @@ volatile uint8_t stb[STB_PINS_COUNT];
 //uint8_t cmd_addr = 0xFF;
 int check_stb();
 
-CSL_UppRegsOvly UPP0Regs = (CSL_UppRegsOvly) (CSL_UPP_0_REGS);
-CSL_UppRegsOvly UPPRegs;
 
 volatile uint8_t tmpb;
 
@@ -192,11 +191,9 @@ int 	len_data_org, 										// длины данных, хранящиеся в буферах data_org, dat
 		len_data7;
 unsigned short *ptr_ui16_buffer;
 int len_ui16_buffer; 										// длина данных, хранящихся в буфере ui16_buffer
-
-volatile Bool upp_resetted = false;
-
 float *bank[10]; 											// = { ptr_data_org, ptr_data1, ptr_data2, ptr_data3, ptr_data4, ptr_data5, ptr_data6, ptr_data7 };
 															// контейнер с указателями на все буферы данных
+
 
 float **data_heap; 											// контейнер долгосрочного хранения данных (расположен в куче)
 int data_heap_len[DATA_HEAP_COUNT]; 						// массив длин данных, хранящихся в массивах контейнера data_heap
@@ -257,7 +254,6 @@ volatile int pack_counter = 0; 								// счетчик приходящих пакетов принимаемог
 
 volatile Bool input_data_enabled; 							// флаг, равный True, если прием данных разрешен
 volatile Bool fpga_prg_started; 							// флаг, равный True, если программа на ПЛИС запущена (если команда NMR_TOOL_START была получена)
-volatile Bool sdsp_started;									// флаг, указывающий на то, что СДСП был запущен и данные готовы
 
 uint8_t msg_was_treated = 0;								// флаг, указывающий на успех/неуспех приема и обработки многопакетного сообщения (= 0 или = коду ошибки, см. MultiPackMsg_Err)
 
@@ -272,15 +268,6 @@ float XX[XX_LEN]; 											// ячейки памяти X0, X1, X2, X3
 volatile uint8_t device_id; 								// идентификатор устройства, данные которого обрабатываются по сигналу GPIO GP[1]
 
 uint8_t pp_is_seq_done = 0;									// индикатор завершения последовательности по команде COM_STOP
-
-volatile unsigned int UART_Dielec_counter = 0; 				// счетчик байт, приходящих от диэлектрическго прибора
-volatile unsigned int UART_Dielec_pack_counter = 0; 		// счетчик пакетов длиной DIELECTR_DATA_LEN байт, приходящих от диэлектрическго прибора
-uint8_t dielec_data[DIELECTR_DATA_LEN]; 					// контейнер для диэлектрических данных
-volatile uint8_t dielec_cycle_number = 0; 					// счетчик циклов обращений к диэлектрическому прибору (изменяется от 0 до DIELECTR_DATA_LEN/sizeof(uint16_t))
-volatile uint32_t UART_Dielec_launch_counter = 0; 			// счетчик циклов обращений к диэлектрическому прибору
-QUEUE8 *diel_queue; 										// контейнер для сообщений о начале/конце режима настройки диэлектрического прибора
-volatile SDSPState sdsp_ready = SDSP_NOT_READY;
-volatile Bool dielec_tool_adjustment = False;				// индикатор запуска настройки диэлектрического прибора
 
 uint8_t telemetric_data[TELEMETRIC_UART_BUF_LEN]; 			// контейнер для телеметрических данных
 volatile unsigned int UART_telemetric_counter = 0; 			// счетчик байт, приходящих от плат телеметрии
@@ -301,10 +288,8 @@ volatile PressureUnitState press_unit_ready = PRESS_UNIT_NOT_READY;	// флаг гото
 
 
 CSL_UartRegsOvly uartRegs;
-CSL_UartRegsOvly uartRegs_Dielec;
 CSL_UartRegsOvly uartRegs_Telemetric;
 UART_Settings uartSettings;
-UART_Settings uartSettings_Dielec;
 UART_Settings uartSettings_Telemetric;
 
 CSL_TmrRegsOvly tmrRegs;
@@ -322,7 +307,7 @@ int free_index = 0;
 Data_Cmd *instr = 0;
 
 
-
+// Start Program **************************************************************
 void main(void)
 {
 #ifdef USE_TIMING
@@ -371,26 +356,6 @@ void main(void)
 	// ------------------------------------------------------------------------
 
 
-	// Dielectric Board UART initialization -----------------------------------
-#ifdef USE_DIELEC_UART
-	uartSettings_Dielec.BaudRate = 19200;
-	uartSettings_Dielec.DataBits = 8;
-	uartSettings_Dielec.StopBits = 1;
-	uartSettings_Dielec.Parity = NO_PARITY;
-	uartSettings_Dielec.LoopBackMode = False;
-	uartSettings_Dielec.FIFOMode = True;
-	uartSettings_Dielec.FIFOLen = 1;
-
-	uartRegs_Dielec = uart0Regs; 							// (for BigGreenBoard #1 - UART0 is for Dielectric)
-
-	reset_UART(uartRegs_Dielec);
-	setup_UART(uartRegs_Dielec, uartSettings_Dielec);
-	setup_UART_INTC(uartRegs_Dielec, 9);
-	memset(dielec_data, 0x00, DIELECTR_DATA_LEN * sizeof(uint8_t)); //array for input data
-#endif
-	// ------------------------------------------------------------------------
-
-
 	// Telemetric Board UART initialization -----------------------------------
 #ifdef USE_TELEMETRIC_UART
 	uartSettings_Telemetric.BaudRate = 19200;
@@ -417,28 +382,23 @@ void main(void)
 	INTCs[2] = INTC_UPP; 					// int 6 added for UPP
 	INTCs[3] = INTC_GPIO; 					// int 7 added for GPIO
 	INTCs[4] = INTC_UART_Tele; 				// int 8 added for Telemetric UART
-	enable_all_INTC(5, INTCs);
+	enable_all_INTC(5, INTCs);													printf("All interrupts were enabled.\n");
 	// ------------------------------------------------------------------------
 
 
 	// Enable devices ---------------------------------------------------------
-#ifndef DEBUG_DIELEC_UART
 	timerSettings.enabled = True;
 	enable_Timer(tmrRegs);
-#endif
-	enable_UART(uartRegs);
 
-#ifdef USE_DIELEC_UART
-	enable_UART(uartRegs_Dielec); 							// start operations on Dielectric UART
-#endif
+	enable_UART(uartRegs);
 
 #ifdef USE_TELEMETRIC_UART
 	memset(telemetric_data, 0x00, TELEMETRIC_UART_BUF_LEN);
 	enable_UART(uartRegs_Telemetric); 						// start operations on Telemetric UART
 #endif
+	// ------------------------------------------------------------------------
 
 	// GPIO
-#ifndef USE_DIELEC_UART
 	PSCModuleControl(SOC_PSC_1_REGS, HW_PSC_GPIO, PSC_POWERDOMAIN_ALWAYS_ON,
 			PSC_MDCTL_NEXT_ENABLE); 						// initialization of GPIO support in PSC module
 	GPIOBank0Pin1PinMuxSetup();								// Pin Multiplexing of pin 1 of GPIO Bank 0 (ADC echo window)
@@ -447,17 +407,7 @@ void main(void)
 	GPIODirModeSet(SOC_GPIO_0_REGS, 2, GPIO_DIR_INPUT);		// Sets the pin 1( GP0[1] )
 	GPIODirModeSet(SOC_GPIO_0_REGS, 3, GPIO_DIR_INPUT);		// Sets the pin 2( GP0[2] )
 	GPIODirModeSet(SOC_GPIO_0_REGS, 4, GPIO_DIR_INPUT);		// Sets the pin 3( GP0[3] )
-#endif
 	// ------------------------------------------------------------------------
-
-#ifdef USE_DIELEC_UART
-	init_uart_hduplex_pins(); 								// control pins initialization
-#endif
-#ifdef DEBUG_ADC_FRQ_READ
-	double proger_adc_frq = 0;
-	proger_adc_frq = proger_rd_adc_frq_hz ();
-#endif
-
 
 	// init device settings ---------------------------------------------------
 	proger_stop();
@@ -470,90 +420,15 @@ void main(void)
 
 	//upp initialization ------------------------------------------------------
 	_disable_interrupts();
-	init_upp();
+	init_upp();																	printf("UPP was initialized.\n");
 	init_upp_ints(); 										// disable for upp_check_poll usage
-	_enable_interrupts();
+	_enable_interrupts();														printf("UPP system interrupts were enabled.\n");
+
+
 	// ------------------------------------------------------------------------
 
 
-#ifdef DEBUG_TELEMETRIC
-	while (1)
-	{
-		/*UART_telemetric_counter = 0;
-		 CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-		 CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		 CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-		 CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');*/
-		/*CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 's');
-		 CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		 CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');*/
-		//dummyDelay(100);
-		UART_telemetric_counter = 0;
 
-		// Temperature channel 0
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(100);
-
-		// Temperature channel 1
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(100);
-
-		// Temperature channel 2
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(100);
-
-		// Current channel 0
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'v');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(500);
-
-		// Current channel 1
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'v');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(100);
-
-		// Current channel 2
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'v');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(100);
-
-		// Voltage channel 3
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'v');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '3');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(100);
-
-		// Voltage channel 4
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'v');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '4');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(100);
-
-		// Voltage channel 5
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'v');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '5');
-		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-		dummyDelay(100000);
-	}
-#endif
 	// ********** Finish (Initialization of Devices) **************************
 
 	//uint8_t simple_uart_message[128] = {'D', 'S', 'P', '_', '0', '.', '4', '9', ' ', '(', '2', '9', '.', '1', '1', '.', '1', '6', ')', '\n', 0};
@@ -562,11 +437,6 @@ void main(void)
 	// ********** Init variables and structs ************
 	// UART message system
 	init_UART_MsgData();
-
-	// UART message control for Dielectric tool mode
-	diel_queue = (QUEUE8*) malloc(sizeof(QUEUE8));
-	QUEUE8_init(HEADER_LEN+2, diel_queue);
-	dielec_tool_adjustment = False;
 
 	// NMR data containers
 	memset(&upp_buffer_page1[0], 0x0, UPP_BUFF_SIZE);
@@ -689,37 +559,12 @@ void main(void)
 	memset(&hard_arr[0], 0x0, 400 * sizeof(uint16_t));
 
 	fpga_prg_started = False;
-	sdsp_started = False;
 
-
-#ifdef DEBUG_GPIO_STATES
-
-	proger_stop();
-	main_proger_wr_pulseprog_test_default();
-	proger_start();
-	//dummyDelay(1000);
-	while(1)
-	{
-		check_stb();
-		while ( stb[3] != STB_FALLING_EDGE ) check_stb();
-		//P15_SET();
-		while ( (stb[1] != STB_FALLING_EDGE) && (pins_cmd != 0) ) check_stb();
-		P15_SET();
-		pins_cmd++;
-		while ( stb[1] != STB_RISING_EDGE ) check_stb();
-		P15_SET();
-		pins_cmd++;
-		while ( stb[3] != STB_RISING_EDGE ) check_stb();
-		P15_CLR();
-	};
-#endif
-
-	//memset(&free_test[0], 0x00, 100 * sizeof(uint8_t));
-	//free_index = 0;
 
 	instr = (Data_Cmd*) malloc(sizeof(Data_Cmd));
 	init_DataProcCmd(instr);
 
+	// Start main loop --------------------------------------------------------
 	printf("Start!\n");
 	P15_CLR();
 	tmpb = 0;
@@ -790,15 +635,7 @@ void main(void)
 #ifdef USE_PRESSURE_UNIT
 			if (press_unit_ready == PRESS_UNIT_READY) tele_flag = 1;
 #endif
-			/*uint8_t out_mask = pg | (tele_flag << 1);
-			switch (out_mask)
-			{
-			case 0:		sendByteArray(&NMRTool_Ready_PowerLow[0], SRV_MSG_LEN + 2, uartRegs); break;
-			case 1:		sendByteArray(&NMRTool_Ready_PowerOK[0], SRV_MSG_LEN + 2, uartRegs); break;
-			case 2:		sendByteArray(&NMRTool_Ready_PowerLow_T[0], SRV_MSG_LEN + 2, uartRegs); break;
-			case 3:		sendByteArray(&NMRTool_Ready_PowerOK_T[0], SRV_MSG_LEN + 2, uartRegs); break;
-			}
-			*/
+
 			uint8_t pp_is_started  = proger_is_started();
 			pp_is_seq_done = proger_is_seq_done();
 			uint8_t out_mask = pg | (tele_flag << 1) | (pp_is_started << 2) | (pp_is_seq_done << 3);
@@ -852,9 +689,6 @@ void main(void)
 			//ready_msg_sent = 0;
 			//printf("Not Ready: %d\n", notready_msg_sent);
 
-			memset(dielec_data, 0xFF, DIELECTR_DATA_LEN * sizeof(uint8_t));
-			UART_Dielec_counter = 0;
-
 			upp_counter = 0;
 			//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 			memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
@@ -869,13 +703,6 @@ void main(void)
 
 		if (tool_state == BUSY) // прибор не доступен для приема/передачи данных по кабелю (находится в состоянии приема и обработки данных ЯМР, GP0[3] = "down")
 		{
-			/*if (ready_msg_sent > 0)	// если так и не отправилось сообщение "NMRTool_NotReady"
-			{
-				sendByteArray(&NMRTool_NotReady[0], SRV_MSG_LEN + 2, uartRegs);
-				ready_msg_sent = 0;
-				printf("Not Ready was sent !\n");
-			}*/
-
 			uppFull = False;
 
 			//if (stb[1] == 3 || stb[1] == 4)
@@ -888,8 +715,6 @@ void main(void)
 				device_id = SDSP_TOOL;
 				int channel_data_id = proger_rd_ch_number();
 				processing_params->channel_id = channel_data_id;
-
-				dielec_cycle_number = 0;
 			}
 			if (stb[1] == STB_RISING_EDGE && device_id == SDSP_TOOL /*&& pins_cmd != 0x00*/)
 			{
@@ -1357,6 +1182,7 @@ void main(void)
 			}
 		}
 	}
+	// ------------------------------------------------------------------------
 
 	disable_Timer(tmrRegs);
 
@@ -1552,17 +1378,13 @@ void executeShortMsg(MsgHeader *_msg_header)
 	case GET_DATA:
 	{
 		if (tool_state == UNKNOWN_STATE) return;
-		//if (fpga_prg_started == False && UART_telemetric_counter != TELEMETRIC_UART_BUF_LEN && sdsp_started == False) return;
-		if (fpga_prg_started == False && UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0 && sdsp_started == False) return;
+		if (fpga_prg_started == False && UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0) return;
 
 		/* 	Commented temporary !
 		Bool to_out = (fpga_prg_started == False);
 #ifdef USE_TELEMETRIC_UART
 		if (temperature_mode == TEMP_MODE_NOT_SPVP) to_out = to_out && (UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0);
 		else if (temperature_mode == TEMP_MODE_SPVP) to_out = to_out && (temp_request_mode == TEMP_READY || voltage_request_mode == VOLT_READY);
-#endif
-#ifdef USE_DIELEC_UART
-		to_out = to_out && (sdsp_started == False);
 #endif
 #ifdef USE_PRESSURE_UNIT
 		int attempts_cnt = 5;
@@ -1654,8 +1476,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 		free(pos);
 
 		disableCache();
-
-		sdsp_started = False;
 
 		sendMultyPackMsg(&out_msg, uartRegs);
 		break;
@@ -2059,171 +1879,6 @@ void executeMultypackMsg(UART_Message *uart_msg)
 			disableCache();
 			//proger_start();
 		}
-		else if (cmd == SDSP_DATA)
-		{
-			enableCacheL1();
-			stopClocker(clocker3);
-
-			uint8_t data_arr[300];
-			uint16_t len = 0;
-			Bool res = extractDataFromPacks(uart_msg, &data_arr[0], &len);
-			if (res == True)
-			{
-				msg_was_treated = MSG_OK;
-
-				uint16_t data_len = (uint16_t) data_arr[1] | ((uint16_t) data_arr[2] << 8);
-				uint16_t pos = PACK_HEAD_LEN;
-
-				if (data_len > 0)
-				{
-					int loc_pos = data_len+pos;
-					if (data_len == 10 && (data_arr[loc_pos-4] == 0x06 && data_arr[loc_pos-3] == 0x10 && data_arr[loc_pos-2] == 0x00 && data_arr[loc_pos-1] == 0x88))	// if ADC data is needed
-					{
-						int outdata_count = output_data->outdata_counter;
-						Bool has_output_data = False;
-
-						int j = 0;
-						for (j = 0; j < DIELECTR_DATA_COUNT; j++)
-						{
-							// for all request
-							int i;
-							for (i = pos; i < data_len+pos-1; i++)
-							{
-								uart_hduplex_sendchar(uartRegs_Dielec, data_arr[i]);
-							}
-							//dummyDelay(200);
-							uart_hduplex_sendchar(uartRegs_Dielec, data_arr[i]);
-							dummyDelay(1000);
-
-							if (UART_Dielec_counter > 0)
-							{
-								int out_shift = output_data->full_size;
-								for (i = 0; i < UART_Dielec_counter; i++)
-								{
-									*(output_data->out_data + out_shift++) = (float)(dielec_data[i]);
-								}
-
-								output_data->outdata_len[outdata_count] += UART_Dielec_counter;
-								output_data->full_size += UART_Dielec_counter;
-
-								has_output_data = True;
-								UART_Dielec_counter = 0;
-							}
-							// ---------------------
-
-							// for last 4 bytes (one more time)
-							for (i = pos+6; i < data_len+pos-1; i++)
-							{
-								uart_hduplex_sendchar(uartRegs_Dielec, data_arr[i]);
-							}
-							//dummyDelay(200);
-							uart_hduplex_sendchar(uartRegs_Dielec, data_arr[i]);
-							dummyDelay(1000);
-
-							if (UART_Dielec_counter > 0)
-							{
-								int out_shift = output_data->full_size;
-								for (i = 0; i < UART_Dielec_counter; i++)
-								{
-									*(output_data->out_data + out_shift++) = (float)(dielec_data[i]);
-								}
-
-								output_data->outdata_len[outdata_count] += UART_Dielec_counter;
-								output_data->full_size += UART_Dielec_counter;
-
-								has_output_data = True;
-								UART_Dielec_counter = 0;
-							}
-						}
-						if (has_output_data == True)
-						{
-							output_data->outdata_counter++;
-							output_data->data_id[outdata_count] = DT_DIEL_ADJUST;
-							output_data->channel_id[outdata_count] = proger_rd_ch_number();
-							hdr->data[0] = DIEL_DATA_READY;
-							hdr->data[1] = msg_was_treated;
-							sdsp_started = True;
-						}
-						else
-						{
-							hdr->data[0] = DATA_FAILED;
-							hdr->data[1] = msg_was_treated;
-						}
-					}
-					else if (data_arr[data_len+pos-1] == 0xC8 || data_arr[data_len+pos-1] == 0x88)	// if ADC data is needed
-					{
-						int outdata_count = output_data->outdata_counter;
-						Bool has_output_data = False;
-
-						int i;
-						for (i = pos; i < data_len+pos-1; i++)
-						{
-							uart_hduplex_sendchar(uartRegs_Dielec, data_arr[i]);
-						}
-						//dummyDelay(200);
-						uart_hduplex_sendchar(uartRegs_Dielec, data_arr[i]);
-						dummyDelay(1000);
-
-						if (UART_Dielec_counter > 0)
-						{
-							int out_shift = output_data->full_size;
-							for (i = 0; i < UART_Dielec_counter; i++)
-							{
-								*(output_data->out_data + out_shift++) = (float)(dielec_data[i]);
-							}
-
-							output_data->outdata_len[outdata_count] += UART_Dielec_counter;
-							output_data->full_size += UART_Dielec_counter;
-
-							has_output_data = True;
-							UART_Dielec_counter = 0;
-						}
-						if (has_output_data == True)
-						{
-							output_data->outdata_counter++;
-							output_data->data_id[outdata_count] = DT_DIEL_ADJUST;
-							output_data->channel_id[outdata_count] = proger_rd_ch_number();
-							hdr->data[0] = DIEL_DATA_READY;
-							hdr->data[1] = msg_was_treated;
-							sdsp_started = True;
-						}
-						else hdr->data[0] = DATA_FAILED;
-					}
-					else	// if there is no request for ADC data
-					{
-						int i;
-						for (i = pos; i < data_len+pos; i++)
-						{
-							uart_hduplex_sendchar(uartRegs_Dielec, data_arr[i]);
-						}
-
-						hdr->data[0] = DATA_OK;
-						hdr->data[1] = msg_was_treated;
-					}
-				}
-				else
-				{
-					hdr->data[0] = DATA_FAILED;
-					hdr->data[1] = msg_was_treated;
-				}
-			}
-			else
-			{
-				hdr->data[0] = DATA_FAILED;
-				hdr->data[1] = msg_was_treated;
-			}
-
-			sendShortMsg(hdr, uartRegs);
-
-			incom_msg_state = NOT_DEFINED;
-			tool_state = FREE;
-
-			outcom_msg_state = MESSAGE_SENT;
-			clearMsgHeader(out_msg.msg_header);
-
-			disableCache();
-			startClocker(clocker3);
-		}
 		else if (cmd == LOG_TOOL_SETTINGS)
 		{
 			enableCacheL1();
@@ -2513,103 +2168,40 @@ interrupt void UART_isr(void)
 #ifdef LOOPBACK_COMM_UART
 			CSL_FINS(uartRegs->THR, UART_THR_DATA, byte);
 #endif
-			if (dielec_tool_adjustment == False)
+			// -------- START and STOP bytes --------
+			Bool flag = False;
+			if (msg_header_state == NOT_DEFINED)
 			{
-				// -------- START and STOP bytes --------
-				Bool flag = False;
-				if (msg_header_state == NOT_DEFINED)
+				if (byte == START_BYTE)
 				{
-					if (byte == START_BYTE)
-					{
-						msg_header_state = STARTED;
-						flag = True;
-						startClocker(clocker1);
-					}
+					msg_header_state = STARTED;
+					flag = True;
+					startClocker(clocker1);
 				}
-				else if (msg_header_state == STARTED)
-				{
-					int sz = QUEUE8_count(uart_queue);
-					if (sz == HEADER_LEN)
-					{
-						if (byte == STOP_BYTE)
-						{
-							incom_msg_state = STARTED;
-							flag = True;
-						}
-					}
-				}
-				// ------------------------------------
-
-				if (flag == False) QUEUE8_put(byte, uart_queue);
-
-				cnt_uart_isr++;
 			}
+			else if (msg_header_state == STARTED)
+			{
+				int sz = QUEUE8_count(uart_queue);
+				if (sz == HEADER_LEN)
+				{
+					if (byte == STOP_BYTE)
+					{
+						incom_msg_state = STARTED;
+						flag = True;
+					}
+				}
+			}
+			// ------------------------------------
+
+			if (flag == False) QUEUE8_put(byte, uart_queue);
+
+			cnt_uart_isr++;
 		}
 		dataUnavailable = FALSE;
 	}
 	else if (uartStatus == E_TRAN_BUF_EMPTY) transmitterFull = FALSE;
 }
 
-
-interrupt void UART_Dielec_isr(void)
-{
-#define UART_REC_BUF_FULL_INT 2
-#define UART_TRAN_BUF_EMPTY_INT 1
-
-	volatile Bool transmitterFullDiel = False;
-
-	unsigned char ch;
-	volatile unsigned int uart_Dielec_Status;
-
-	// Determine Prioritized Pending UART Interrupt
-	uart_Dielec_Status = CSL_FEXT(uartRegs_Dielec->IIR, UART_IIR_INTID);
-
-	// Set Appropriate Bool
-	if (uart_Dielec_Status == UART_REC_BUF_FULL_INT)
-	{
-		ch = CSL_FEXT(uartRegs_Dielec->RBR, UART_RBR_DATA);
-#ifdef LOOPACK_DIELEC_UART
-		uart_hduplex_sendchar(uartRegs_Dielec, ch);
-#endif
-
-		if (dielec_tool_adjustment == True)
-		{
-			write_UART(uartRegs, ch);
-		}
-		else
-		{
-			dielec_data[UART_Dielec_counter] = ch;
-
-			UART_Dielec_counter++;
-			if (UART_Dielec_counter == (DIELECTR_DATA_LEN * sizeof(uint8_t))) // buffer overflow
-			{
-				UART_Dielec_counter = 0;
-			};
-		}
-
-
-#ifdef DEBUG_DIELEC_UART
-		write_UART(uart1Regs, ch);
-
-		 if ( UART_Dielec_counter == (DIELECTR_DATA_LEN*sizeof(uint8_t)) ) // buffer overflow
-		 {
-			 UART_Dielec_counter = 0;
-		 };
-		 if ( UART_Dielec_counter == (DIELECTR_MSG_LEN*sizeof(uint8_t)) ) // packet length received
-		 {
-			 UART_Dielec_counter = 0;
-		 	 if ( ((dielec_data[DIELECTR_MSG_LEN - 1] << 8) | dielec_data[DIELECTR_MSG_LEN - 2]) == 1000 )
-		 		 if ( ((dielec_data[DIELECTR_MSG_LEN - 3] << 8) | dielec_data[DIELECTR_MSG_LEN - 4]) == 100 )
-		 			 UART_Dielec_pack_counter++;
-		}
-#endif
-		//expected 08 DD DD
-	}
-	else if (uart_Dielec_Status == UART_TRAN_BUF_EMPTY_INT)
-	{
-		transmitterFullDiel = False;
-	}; //
-}
 
 interrupt void upp_isr(void)
 {
@@ -2765,7 +2357,7 @@ void clocker4_ISR(void)
 
 void clocker5_ISR(void)
 {
-	sdsp_ready = SDSP_READY;
+
 }
 
 void sendServiceMsg(MsgHeader *_msg_header, CSL_UartRegsOvly uartRegs)
@@ -3256,28 +2848,6 @@ void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 			}
 			break;
 		}
-		case DT_DIEL:
-		case DT_DIEL_ADJUST:
-		{
-			uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(float));
-			data_fin[index++] = (uint8_t) data_id;
-			data_fin[index++] = (uint8_t) channel_data_id;
-			data_fin[index++] = (uint8_t) group_index;
-			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
-			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
-
-			memcpy(&data_fin[index], (uint8_t*) (out_buff->out_data + pos), data_in_bytes);
-			pos += data_len;
-			index += data_in_bytes;
-			if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
-			/*if (outdata_count > 1 && i < outdata_count - 2)
-			 {
-			 data_fin[index++] = 0x53;
-			 data_fin[index++] = 0x35;
-			 }*/
-			data_fin_counter = index;
-			break;
-		}
 		case DT_GAMMA:
 		case DT_PRESS_UNIT:
 		{
@@ -3416,11 +2986,6 @@ void executeProcPack(Data_Proc *proc, int index)
 
 	if (proc->proc_lens[index] <= 0) //return;					// если в пакете инструкций не было найдено инструкций, то выход
 	{
-		//if (free_index > 98) free_index = 0;
-		//free_test[free_index++] = 10;
-		//free(instr->params);
-		//free(instr);
-		//free_test[free_index++] = 100;
 		return;
 	}
 
@@ -3581,185 +3146,6 @@ void executeProcPack(Data_Proc *proc, int index)
 			{
 				*XX = (float) gamma_counts;
 			}
-			break;
-		}
-		case INS_START_SDSP:
-		{
-			UART_Dielec_counter = 0;
-			memset(dielec_data, 0x00, DIELECTR_DATA_LEN * sizeof(uint8_t));
-			sdsp_ready = SDSP_NOT_READY;
-
-			// Reset
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 1);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);
-
-			// Start autoscan
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);
-			uart_hduplex_sendchar(uartRegs_Dielec, 32);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-
-			//startClocker(clocker5);
-			//while (sdsp_ready != SDSP_READY);
-			break;
-		}
-		case INS_GET_SDSP:
-		{
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);
-#ifndef DEBUG_DIELEC_UART
-			uart_hduplex_sendchar(uartRegs_Dielec, 200);
-#endif
-			dummyDelay(1000);
-
-			if (UART_Dielec_counter == DIELECTR_MSG_LEN)
-			{
-				int outdata_count = output_data->outdata_counter;
-				memcpy(output_data->out_data + output_data->full_size, &dielec_data[0], DIELECTR_MSG_LEN * sizeof(uint8_t));
-				output_data->data_id[outdata_count] = DT_DIEL;
-				output_data->channel_id[outdata_count] = processing_params->channel_id; //proger_rd_ch_number();
-				output_data->outdata_len[outdata_count] = DIELECTR_MSG_LEN / sizeof(float);
-				output_data->full_size += DIELECTR_MSG_LEN / sizeof(float);
-				output_data->outdata_counter++;
-			}
-			break;
-		}
-		case INS_STOP_SDSP:
-		{
-			// выключение передатчика ----------------
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);		// команда CMD.WRITE_EXT
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 16);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);		// параметр команды CMD.WRITE_EXT = (1 << 10) + 2
-			uart_hduplex_sendchar(uartRegs_Dielec, 2);
-			uart_hduplex_sendchar(uartRegs_Dielec, 4);
-
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);		// команда CMD.CMD0
-			uart_hduplex_sendchar(uartRegs_Dielec, 1);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);		// параметр команды CMD.CMD0 = 0xff (любой)
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			// ---------------------------------------
-
-			// выключение каналов и питания ----------
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);		// команда CMD.WRITE_EXT
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 16);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);		// параметр команды CMD.WRITE_EXT = параметр = (1 << 9) + (включено ли питание(1 бит) << 2) + (включен ли канал 2(1 бит) << 1) + включен ли канал 1(1 бит)
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 2);
-
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);		// команда CMD.CMD0
-			uart_hduplex_sendchar(uartRegs_Dielec, 1);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);		// параметр команды CMD.CMD0 = 0xff (любой)
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			// ---------------------------------------
-			break;
-		}
-		case INS_START_SDSP_ADC:
-		{
-			// Reset
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 1);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);
-
-			// однократный запуск АЦП
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);
-			uart_hduplex_sendchar(uartRegs_Dielec, 16);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-			uart_hduplex_sendchar(uartRegs_Dielec, 8);
-			uart_hduplex_sendchar(uartRegs_Dielec, 255);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-
-			break;
-		}
-		case INS_GET_SDSP_ADC:
-		{
-			// чтение данных АЦП (разность фаз)
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);
-			uart_hduplex_sendchar(uartRegs_Dielec, 16);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-#ifndef DEBUG_DIELEC_UART
-			uart_hduplex_sendchar(uartRegs_Dielec, 136);
-#endif
-			dummyDelay(100);
-
-			uint8_t dat1[DIELECTR_MSG_LEN];
-			int dat1_len = UART_Dielec_counter;
-			if (UART_Dielec_counter > 0)
-			{
-				int i;
-				for (i = 0; i < UART_Dielec_counter; i++)
-				{
-					dat1[i] = dielec_data[i];
-				}
-				UART_Dielec_counter = 0;
-			}
-			// ---------------------
-
-			// чтение данных АЦП (отношение амплитуд)
-			uart_hduplex_sendchar(uartRegs_Dielec, 6);
-			uart_hduplex_sendchar(uartRegs_Dielec, 16);
-			uart_hduplex_sendchar(uartRegs_Dielec, 0);
-#ifndef DEBUG_DIELEC_UART
-			uart_hduplex_sendchar(uartRegs_Dielec, 136);
-#endif
-			dummyDelay(100);
-
-			uint8_t dat2[DIELECTR_MSG_LEN];
-			int dat2_len = UART_Dielec_counter;
-			if (UART_Dielec_counter > 0)
-			{
-				int i;
-				for (i = 0; i < UART_Dielec_counter; i++)
-				{
-					dat2[i] = dielec_data[i];
-				}
-				UART_Dielec_counter = 0;
-			}
-
-			//int out_shift = output_data->full_size;
-			//int outdata_count = output_data->outdata_counter;
-
-			if (dat1_len == dat2_len && dat1_len > 0)
-			{
-				int out_shift = summ_data->pos;
-				int i; for (i = 0; i < dat1_len; i += 2)
-				{
-					//*(output_data->out_data + out_shift++) = (float)(dat1[i]);
-					//*(output_data->out_data + out_shift++) = (float)(dat2[i]);
-
-					summ_data->sum_data[out_shift++] = (float)(dat1[i]);
-					summ_data->sum_data[out_shift++] = (float)(dat1[i+1]);
-					summ_data->sum_data[out_shift++] = (float)(dat2[i]);
-					summ_data->sum_data[out_shift++] = (float)(dat2[i+1]);
-				}
-				summ_data->data_id = DT_DIEL_ADJUST;
-				summ_data->pos += (dat1_len + dat2_len);
-				summ_data->group_index = 1;
-				summ_data->channel_id = proger_rd_ch_number();
-
-				//output_data->data_id[outdata_count] = DT_DIEL_ADJUST;
-				//output_data->outdata_len[outdata_count] = dat1_len + dat2_len;
-				//output_data->group_index[outdata_count] = 0;
-				//output_data->full_size += (dat1_len + dat2_len);
-			}
-
-			//output_data->outdata_counter++;
 			break;
 		}
 		case INS_FFT:
