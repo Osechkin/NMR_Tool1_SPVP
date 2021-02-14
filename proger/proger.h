@@ -58,12 +58,47 @@ int proger_mem_clear ();
 unsigned int proger_read_grad_status ();
 unsigned int proger_start_grad ();
 
-unsigned int proger_read_mtr_run_status ();
-unsigned int proger_read_mtr_dir_status ();
-unsigned int proger_start_mtr ();
-unsigned int proger_stop_mtr ();
-unsigned int proger_run_mtr ( unsigned int run);
-unsigned int proger_dir_mtr ( unsigned int dir);
+
+// Developed by Roman Kochkin -------------------------------------------------
+// Получение статуса "лапы": см. enum state
+unsigned char proger_read_mtr_status ();
+// Управление "лапой": см. enum motor_cmd_t
+unsigned char proger_cmd_mtr ( unsigned char cmd);
+// Считывает значение счетчика оборотов винта, значение показывает положение винта (4 байта)
+signed int proger_read_counter_mtr (void);
+
+typedef union {
+	struct {
+		enum {
+				STATE_MOTOR_STOP 		= 0x0,
+				STATE_MOTOR_UP			= 0x3,
+				STATE_MOTOR_DOWN		= 0x1,
+				STATE_MOTOR_BRAKE_UP	= 0x6,
+				STATE_MOTOR_BRAKE_DOWN	= 0x4
+		} state								:3;
+		unsigned int switch_down 			:1;
+		unsigned int switch_up 				:1;
+		unsigned int						:0;
+	} field;
+	unsigned char reg;
+} motor_status_reg_t;
+
+
+typedef enum {
+	CMD_MOTOR_STOP			= 0x0,
+	CMD_MOTOR_UP			= 0x3,
+	CMD_MOTOR_DOWN			= 0x1,
+	CMD_MOTOR_COUNTER_RESET	= 0x4
+} motor_cmd_t;
+
+// Запускает АЦП, который измеряет напряжение на потенциометре, показывающем положение штока
+unsigned char proger_mtr_adc_start_conversion(void);
+// занято/свободно АЦП на потенциометре
+unsigned char proger_read_mtr_adc_status(void); // 0 - busy, 1 -ready
+// чтение значения на АЦП (12 бит) потенциометра (каналов два)
+unsigned int proger_read_mtr_adc_value (unsigned char channel);
+// ----------------------------------------------------------------------------
+
 
 //int proger_test_mem_pulseprog ();
 //int main_proger_wr_pulseprog_test_GPIO3 ();

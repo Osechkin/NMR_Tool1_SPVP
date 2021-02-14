@@ -105,10 +105,18 @@
 #define MEM_ADDR_GRAD_CONFIG_REG (PROGER_BASE_ADDR +  372)
 #define MEM_ADDR_GRAD_STATUS_REG (PROGER_BASE_ADDR + 376)
 
-#define MEM_ADDR_MTR_RUN_REG (PROGER_BASE_ADDR + 380)
-#define MEM_ADDR_MTR_DIR_REG (PROGER_BASE_ADDR + 384)
+#define MEM_ADDR_MTR_CMD_REG 		(PROGER_BASE_ADDR + 0x180)
+#define MEM_ADDR_MTR_STATUS_REG 	(PROGER_BASE_ADDR + 0x184)
+#define MEM_ADDR_MTR_COUNTER_REG 	(PROGER_BASE_ADDR + 0x188)
 
-#define MEM_ADDR_IO_CTRL_REG (PROGER_BASE_ADDR + 388)
+#define MEM_ADDR_MTR_ADC_CTRL_1 	(PROGER_BASE_ADDR + 0x190)
+#define MEM_ADDR_MTR_ADC_STATUS_1 	(PROGER_BASE_ADDR + 0x194)
+#define MEM_ADDR_MTR_ADC_VALUE0_2 	(PROGER_BASE_ADDR + 0x198)
+#define MEM_ADDR_MTR_ADC_VALUE1_2 	(PROGER_BASE_ADDR + 0x19c)
+
+
+#define MEM_ADDR_IO_CTRL_REG 		(PROGER_BASE_ADDR + 0x200)
+
 //---------------------------------------------------------------------------
 
 //---------------------------------------------------------------------------

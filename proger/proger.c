@@ -577,72 +577,67 @@ unsigned int proger_start_grad ()
 }// proger_start_grad
 /*---------------------------------------------------------------------------*/
 
-unsigned int proger_read_mtr_run_status ()
-{
-	volatile unsigned int mtr_status;
-
-	mtr_status  = proger_rd_reg_32(MEM_ADDR_MTR_RUN_REG);
-
-	return (mtr_status);
-}// proger_read_mtr_run_status
 /*---------------------------------------------------------------------------*/
 
-unsigned int proger_read_mtr_dir_status ()
+unsigned char proger_read_mtr_status ()
 {
-	volatile unsigned int mtr_status;
+	volatile unsigned char mtr_status;
 
-	mtr_status  = proger_rd_reg_32(MEM_ADDR_MTR_DIR_REG);
+	mtr_status  = (unsigned char)(proger_rd_reg_32(MEM_ADDR_MTR_STATUS_REG) & 0xff);
 
-	return (mtr_status);
+	return  mtr_status;
 }// proger_read_mtr_dir_status
 /*---------------------------------------------------------------------------*/
 
-unsigned int proger_start_mtr ()
-{
-	volatile unsigned int mtr_status;
-
-	proger_wr_reg_32 (MEM_ADDR_MTR_RUN_REG, 0x01);
-
-	mtr_status  = proger_rd_reg_32(MEM_ADDR_MTR_RUN_REG);
-
-	return (mtr_status);
-}// proger_start_mtr
 /*---------------------------------------------------------------------------*/
 
-unsigned int proger_stop_mtr ()
+unsigned char proger_cmd_mtr ( unsigned char cmd)
 {
-	volatile unsigned int mtr_status;
 
-	proger_wr_reg_32 (MEM_ADDR_MTR_RUN_REG, 0x00);
+	proger_wr_reg_32 (MEM_ADDR_MTR_CMD_REG, cmd);
 
-	mtr_status  = proger_rd_reg_32(MEM_ADDR_MTR_RUN_REG);
-
-	return (mtr_status);
-}// proger_start_mtr
-/*---------------------------------------------------------------------------*/
-
-unsigned int proger_run_mtr ( unsigned int run)
-{
-	volatile unsigned int mtr_status;
-
-	proger_wr_reg_32 (MEM_ADDR_MTR_RUN_REG, run);
-
-	mtr_status  = proger_rd_reg_32(MEM_ADDR_MTR_RUN_REG);
-
-	return (mtr_status);
+	return proger_read_mtr_status ();
 }// proger_run_mtr
 /*---------------------------------------------------------------------------*/
 
-unsigned int proger_dir_mtr ( unsigned int dir)
+signed int proger_read_counter_mtr (void)
 {
-	volatile unsigned int mtr_status;
+	volatile signed int mtr_counter;
 
-	proger_wr_reg_32 (MEM_ADDR_MTR_DIR_REG, dir);
+	mtr_counter  = proger_rd_reg_32(MEM_ADDR_MTR_COUNTER_REG);
 
-	mtr_status  = proger_rd_reg_32(MEM_ADDR_MTR_DIR_REG);
-
-	return (mtr_status);
+	return (mtr_counter);
 }// proger_run_mtr
+/*---------------------------------------------------------------------------*/
+
+unsigned char proger_mtr_adc_start_conversion(void)
+{
+	volatile unsigned char status;
+	proger_wr_reg_32 (MEM_ADDR_MTR_ADC_CTRL_1, 0x01);
+
+	return proger_read_mtr_adc_status();
+}
+
+/*---------------------------------------------------------------------------*/
+// 0 - busy, 1 -ready
+
+unsigned char proger_read_mtr_adc_status(void)
+{
+	return (unsigned char)(proger_rd_reg_32(MEM_ADDR_MTR_ADC_STATUS_1) & 0xff);
+}
+
+/*---------------------------------------------------------------------------*/
+
+unsigned int proger_read_mtr_adc_value (unsigned char channel)
+{
+	volatile unsigned int ch_reg_addr;
+	if (channel==0) ch_reg_addr = MEM_ADDR_MTR_ADC_VALUE0_2;
+	else if (channel==1) ch_reg_addr = MEM_ADDR_MTR_ADC_VALUE1_2;
+	else return 0xffff;
+
+	return (proger_rd_reg_32(ch_reg_addr) & 0xffff);
+}
+
 /*---------------------------------------------------------------------------*/
 
 

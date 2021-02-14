@@ -49,7 +49,8 @@ static float ADC_to_mV = 0.3398;			// коэффициент перевода отсчетов АЦП в [мВ]
 
 // Device Addresses
 #define PC_MAIN             0x01        	// User's PC (адрес рабочей станции оператора)
-#define NMR_TOOL            0x02        	// NMR logging tool (адрес прибора ЯМК)
+#define LOGGING_TOOL		0x02			// Logging Tool
+#define NMR_TOOL            0xFE        	// NMR logging tool (адрес прибора ЯМК)
 #define COMM_TOOL           0x03        	// Communication board
 #define SDSP_TOOL			0xE0			// dielectric device (SDSP)
 #define GAMMA_TOOL			0x05			// Gamma tool
@@ -98,6 +99,10 @@ static float ADC_to_mV = 0.3398;			// коэффициент перевода отсчетов АЦП в [мВ]
 #define SDSP_REQUEST_88		0xFE			// отправка запроса 0x88 на данные в диелектрический прибор (2^88 of Galois)
 #define LOG_TOOL_SETTINGS	0x11			// отправка настроек каналов каротажного прибора (2^100 of Galois)
 #define NMRTOOL_CONNECT_DEF	0x1A		// first connect to LoggingTool (2^105 of Galois)
+
+#define PRESS_UNIT_OPEN		0x34			// выдвинуть "лапу" прижимного прибора (2^106 of Galois)
+#define PRESS_UNIT_CLOSE	0xD0			// задвинуть "лапу" прижимного прибора (2^108 of Galois)
+#define PRESS_UNIT_STOP		0xD1			// остановить движение"лапы" прижимного прибора
 
 											// Формат: cmd (1 byte) -- len (2 bytes) -- func_type(time domain) -- x0(time domain) -- sigma (time domain) -- func_type(freq domain) -- x0(freq domain) -- sigma (freq domain)
 // Format of commands:
@@ -171,6 +176,11 @@ typedef enum {								// флаги, свидетельствующие о готовности данных телеметрии
 	TELE_NOT_READY = 0,						// данные телеметрии не готовы
 	TELE_READY = 1							// данные телеметрии готовы
 } TelemetryState;
+
+typedef enum {								// флаги, свидетельствующие о готовности данных прижимного устройства
+	PRESS_UNIT_NOT_READY = 0,				// данные прижимного устройства не готовы
+	PRESS_UNIT_READY = 1					// данные прижимного устройства готовы
+} PressureUnitState;
 
 typedef enum {								// флаги, свидетельствующие о готовности данных СДСП (диэлектрический прибор)
 	SDSP_NOT_READY = 0,						// данные SDSP не готовы

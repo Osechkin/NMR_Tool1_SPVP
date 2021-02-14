@@ -110,6 +110,9 @@ void sendMultyPackMsg(UART_Message *uart_msg, CSL_UartRegsOvly uartRegs);
 void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff);
 void summationDataToOutput(OutBuffer *out_buff, SummationBuffer *sum_buff);
 void telemetryDataToOutput(OutBuffer *out_buff);
+#ifdef USE_PRESSURE_UNIT
+void pressureUnitDataToOutput(OutBuffer *out_buff);
+#endif
 //void extractDataFromPacks(UART_Message *uart_msg, uint8_t *arr, uint16_t *len);
 void generateTestEchoData(int index, int count);
 Bool extractDataFromPacks(UART_Message *uart_msg, uint8_t *arr, uint16_t *len);
@@ -286,6 +289,16 @@ volatile unsigned int UART_telemetric_pack_counter = 0; 	// счетчик пакетов длин
 volatile unsigned int UART_telemetric_local_counter = 0; 	// локальный счетчик для подсчета данных внутри пакета
 volatile uint8_t telemetric_board_status = 0;
 volatile TelemetryState telemetry_ready = TELE_NOT_READY; 	// флаг готовности телеметрической информации
+
+
+// Pressure Unit variables ---------------------------------------------------
+#ifdef USE_PRESSURE_UNIT
+unsigned int press_unit_data;								// контейнер для данных прижимного устройства
+volatile PressureUnitState press_unit_ready = PRESS_UNIT_NOT_READY;	// флаг готовности измерить данные прижимного устройства
+#endif
+// ---------------------------------------------------------------------------
+
+
 
 CSL_UartRegsOvly uartRegs;
 CSL_UartRegsOvly uartRegs_Dielec;
@@ -643,6 +656,8 @@ void main(void)
 	t_stop = clock();
 	t_overhead = t_stop - t_start;
 
+
+
 #ifdef USE_TIMING
 	uint32_t tsch = TSCH;
 	uint32_t tscl = TSCL;
@@ -654,6 +669,10 @@ void main(void)
 	startClocker(clocker3);
 	startClocker(clocker4);
 	telemetry_ready = TELE_NOT_READY;
+#ifdef USE_PRESSURE_UNIT
+	press_unit_ready = PRESS_UNIT_NOT_READY;
+	press_unit_data = 0;
+#endif
 
 	int upp_counter;
 	volatile int soft_echo_counter = 0;
@@ -768,6 +787,9 @@ void main(void)
 			uint8_t pg = (uint8_t) proger_rd_pwr_pg();
 			uint8_t tele_flag = 0;
 			if (UART_telemetric_counter == TELEMETRIC_UART_BUF_LEN) tele_flag = 1;
+#ifdef USE_PRESSURE_UNIT
+			if (press_unit_ready == PRESS_UNIT_READY) tele_flag = 1;
+#endif
 			/*uint8_t out_mask = pg | (tele_flag << 1);
 			switch (out_mask)
 			{
@@ -888,7 +910,7 @@ void main(void)
 
 			// ******************** NMR Tool... ************************
 			//if (pin1_state == GPIO_FALL_STATE && cmd_addr == 0xFE)
-			if (stb[1] == STB_FALLING_EDGE && pins_cmd == 0xFE)
+			if (stb[1] == STB_FALLING_EDGE && pins_cmd == NMR_TOOL)
 			{
 				device_id = NMR_TOOL;
 				int channel_data_id = proger_rd_ch_number();
@@ -1533,12 +1555,39 @@ void executeShortMsg(MsgHeader *_msg_header)
 		//if (fpga_prg_started == False && UART_telemetric_counter != TELEMETRIC_UART_BUF_LEN && sdsp_started == False) return;
 		if (fpga_prg_started == False && UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0 && sdsp_started == False) return;
 
+		/* 	Commented temporary !
+		Bool to_out = (fpga_prg_started == False);
+#ifdef USE_TELEMETRIC_UART
+		if (temperature_mode == TEMP_MODE_NOT_SPVP) to_out = to_out && (UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0);
+		else if (temperature_mode == TEMP_MODE_SPVP) to_out = to_out && (temp_request_mode == TEMP_READY || voltage_request_mode == VOLT_READY);
+#endif
+#ifdef USE_DIELEC_UART
+		to_out = to_out && (sdsp_started == False);
+#endif
+#ifdef USE_PRESSURE_UNIT
+		int attempts_cnt = 5;
+		if (proger_read_mtr_adc_status())
+		{
+			proger_mtr_adc_start_conversion();
+			while (attempts_cnt > 0)
+			{
+				dummyDelay(1);
+				if (proger_read_mtr_adc_status()) break;
+				else --attempts_cnt;
+			}
+		}
+
+		to_out = to_out && (attempts_cnt == 0);
+#endif
+		if (to_out) return;
+		*/
+
 		//printf("Get Data !\n");
 
 		MsgHeader *hdr = out_msg.msg_header;
 		hdr->msg_type = MTYPE_MULTYPACK;
 		hdr->reader = PC_MAIN;
-		hdr->writer = NMR_TOOL;
+		hdr->writer = LOGGING_TOOL;
 		hdr->id = _msg_header->id;
 		hdr->pack_count = 0;
 		hdr->pack_len = msg_settings->pack_len;
@@ -1554,6 +1603,21 @@ void executeShortMsg(MsgHeader *_msg_header)
 		setupDDR2Cache();
 		enableCacheL1();
 
+		/* Commented temporary !
+#ifdef USE_TELEMETRIC_UART
+		if (telemetry_ready == TELE_READY)
+		{
+			telemetryDataToOutput(output_data);
+			//printf("Telemetry is ready!\n");
+		}
+#endif
+#ifdef USE_PRESSURE_UNIT
+		if (press_unit_ready == PRESS_UNIT_READY)
+		{
+			pressureUnitDataToOutput(output_data);
+		}
+#endif
+*/
 		telemetryDataToOutput(output_data);
 		summationDataToOutput(output_data, summ_data);
 		prepareOutputByteArray(output_data, summ_data);
@@ -1624,7 +1688,7 @@ void executeShortMsg(MsgHeader *_msg_header)
 		MsgHeader *hdr = out_msg.msg_header;
 		hdr->msg_type = MTYPE_SHORT;
 		hdr->reader = PC_MAIN;
-		hdr->writer = NMR_TOOL;
+		hdr->writer = LOGGING_TOOL;
 		hdr->id = _msg_header->id;
 		memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
 		hdr->data[0] = NMRTOOL_CONNECT;
@@ -1649,7 +1713,7 @@ void executeShortMsg(MsgHeader *_msg_header)
 			MsgHeader *hdr = out_msg.msg_header;
 			hdr->msg_type = MTYPE_SHORT;
 			hdr->reader = PC_MAIN;
-			hdr->writer = NMR_TOOL;
+			hdr->writer = LOGGING_TOOL;
 			hdr->id = _msg_header->id;
 			memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
 			hdr->data[0] = NMRTOOL_CONNECT_DEF;
@@ -1676,7 +1740,7 @@ void executeShortMsg(MsgHeader *_msg_header)
 		MsgHeader *hdr = out_msg.msg_header;
 		hdr->msg_type = MTYPE_SHORT;
 		hdr->reader = PC_MAIN;
-		hdr->writer = NMR_TOOL;
+		hdr->writer = LOGGING_TOOL;
 		hdr->id = _msg_header->id;
 		memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
 		hdr->data[0] = DATA_OK;
@@ -1719,7 +1783,7 @@ void executeShortMsg(MsgHeader *_msg_header)
 		MsgHeader *hdr = out_msg.msg_header;
 		hdr->msg_type = MTYPE_SHORT;
 		hdr->reader = PC_MAIN;
-		hdr->writer = NMR_TOOL;
+		hdr->writer = LOGGING_TOOL;
 		hdr->id = _msg_header->id;
 		memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
 		hdr->data[0] = DATA_OK;
@@ -1740,6 +1804,87 @@ void executeShortMsg(MsgHeader *_msg_header)
 
 		break;
 	}
+	case PRESS_UNIT_OPEN:
+	{
+		MsgHeader *hdr = out_msg.msg_header;
+		hdr->msg_type = MTYPE_SHORT;
+		hdr->reader = PC_MAIN;
+		hdr->writer = LOGGING_TOOL;
+		hdr->id = _msg_header->id;
+		memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
+		hdr->data[0] = DATA_OK;
+
+		sendShortMsg(hdr, uartRegs);
+		outcom_msg_state = MESSAGE_SENT;
+		clearMsgHeader(out_msg.msg_header);
+
+		// move up the pressure unit (Open)
+		dummyDelay(1);
+		unsigned char res = proger_cmd_mtr(CMD_MOTOR_UP);
+		dummyDelay(1);
+		//res = proger_cmd_mtr(CMD_MOTOR_UP);
+		unsigned char cmd_mtr_state = proger_read_mtr_status();
+
+		clocker4->max_val = 1000;
+		startClocker(clocker4);
+		incom_msg_state = NOT_DEFINED;
+		//printf("OPEN! Motor status : %X\n", cmd_mtr_state);
+		break;
+	}
+	case PRESS_UNIT_CLOSE:
+	{
+		MsgHeader *hdr = out_msg.msg_header;
+		hdr->msg_type = MTYPE_SHORT;
+		hdr->reader = PC_MAIN;
+		hdr->writer = LOGGING_TOOL;
+		hdr->id = _msg_header->id;
+		memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
+		hdr->data[0] = DATA_OK;
+
+		sendShortMsg(hdr, uartRegs);
+		outcom_msg_state = MESSAGE_SENT;
+		clearMsgHeader(out_msg.msg_header);
+
+		// move down the pressure unit (Close)
+		dummyDelay(1);
+		unsigned char res = proger_cmd_mtr(CMD_MOTOR_DOWN);
+		dummyDelay(1);
+		//res = proger_cmd_mtr(CMD_MOTOR_DOWN);
+		unsigned char cmd_mtr_state = proger_read_mtr_status();
+
+		clocker4->max_val = 1000;
+		startClocker(clocker4);
+		incom_msg_state = NOT_DEFINED;
+		//printf("CLOSE! Motor status : %X\n", cmd_mtr_state);
+		break;
+	}
+	case PRESS_UNIT_STOP:
+	{
+		MsgHeader *hdr = out_msg.msg_header;
+		hdr->msg_type = MTYPE_SHORT;
+		hdr->reader = PC_MAIN;
+		hdr->writer = LOGGING_TOOL;
+		hdr->id = _msg_header->id;
+		memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
+		hdr->data[0] = DATA_OK;
+
+		sendShortMsg(hdr, uartRegs);
+		outcom_msg_state = MESSAGE_SENT;
+		clearMsgHeader(out_msg.msg_header);
+
+		// stop the pressure unit (Stop)
+		dummyDelay(1);
+		unsigned char res = proger_cmd_mtr(CMD_MOTOR_STOP);
+		dummyDelay(1);
+		//res = proger_cmd_mtr(CMD_MOTOR_STOP);
+		unsigned char cmd_mtr_state = proger_read_mtr_status();
+
+		clocker4->max_val = 10000;
+		startClocker(clocker4);
+		incom_msg_state = NOT_DEFINED;
+		//printf("STOP! Motor status : %X\n", cmd_mtr_state);
+		break;
+	}
 	default: break;
 	}
 }
@@ -1749,7 +1894,7 @@ void executeMultypackMsg(UART_Message *uart_msg)
 	MsgHeader *hdr = out_msg.msg_header;
 	hdr->msg_type = MTYPE_SHORT;
 	hdr->reader = PC_MAIN;
-	hdr->writer = NMR_TOOL;
+	hdr->writer = LOGGING_TOOL;
 	hdr->id = uart_msg->msg_header->id;
 	memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
 
@@ -2135,7 +2280,7 @@ void responseMultypackHeader(MsgHeader *_msg_header)
 	MsgHeader *hdr = out_msg.msg_header;
 	hdr->msg_type = MTYPE_SHORT;
 	hdr->reader = PC_MAIN;
-	hdr->writer = NMR_TOOL;
+	hdr->writer = LOGGING_TOOL;
 	hdr->id = _msg_header->id;
 	memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
 	hdr->data[0] = HEADER_OK;
@@ -2201,7 +2346,7 @@ void requestLastMsg()
 	MsgHeader *hdr = out_msg.msg_header;
 	hdr->msg_type = MTYPE_SHORT;
 	hdr->reader = PC_MAIN;
-	hdr->writer = NMR_TOOL;
+	hdr->writer = LOGGING_TOOL;
 	hdr->id = 0;
 	memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
 	hdr->data[0] = REPEAT_CMD;
@@ -2556,7 +2701,7 @@ void clocker2_ISR(void)
 	MsgHeader *hdr = out_msg.msg_header;
 	hdr->msg_type = MTYPE_SHORT;
 	hdr->reader = PC_MAIN;
-	hdr->writer = NMR_TOOL;
+	hdr->writer = LOGGING_TOOL;
 	hdr->id = in_msg.msg_header->id;
 	memset(&hdr->data[0], 0x0, SRV_DATA_LEN * sizeof(uint8_t));
 	hdr->data[0] = DATA_FAILED;
@@ -2587,6 +2732,12 @@ void clocker3_ISR(void)
 		case 3:		sendByteArray(&NMRTool_Ready_PowerOK_T[0], SRV_MSG_LEN + 2, uartRegs); break;
 		}
 		*/
+
+#ifdef USE_PRESSURE_UNIT
+		if (press_unit_ready == PRESS_UNIT_READY) tele_flag = 1;
+		//press_unit_ready = PRESS_UNIT_NOT_READY;
+#endif
+
 		uint8_t pp_is_started  = proger_is_started();
 		//pp_is_seq_done = proger_is_seq_done();
 		uint8_t out_mask = pg | (tele_flag << 1) | (pp_is_started << 2) | (pp_is_seq_done << 3);
@@ -2604,6 +2755,10 @@ void clocker4_ISR(void)
 		//toMeasureTemperatures();
 		telemetry_ready = TELE_READY;
 	}
+
+#ifdef USE_PRESSURE_UNIT
+	press_unit_ready = PRESS_UNIT_READY;
+#endif
 
 	startClocker(clocker4);
 }
@@ -2849,6 +3004,45 @@ void telemetryDataToOutput(OutBuffer *out_buff)
 	telemetry_ready = TELE_NOT_READY;
 }
 
+#ifdef USE_PRESSURE_UNIT
+void pressureUnitDataToOutput(OutBuffer *out_buff)
+{
+	int adc_channel = 0;
+	unsigned int mtr_adc_value = proger_read_mtr_adc_value (adc_channel);
+	signed int mtr_counter = proger_read_counter_mtr ();
+	unsigned int mtr_status = proger_read_mtr_status ();
+
+	/*if ((mtr_status & 0x4) >> 2 && clocker4->max_val < 10000)
+	{
+		clocker4->max_val = 10000;
+		startClocker(clocker4);
+	}*/
+
+	float *dst = out_buff->out_data;
+	int dst_pos = out_buff->full_size;
+	int data_cnt = out_buff->outdata_counter;
+
+	memcpy((uint8_t*) (dst + dst_pos), &mtr_adc_value, sizeof(uint32_t));
+	dst_pos += 1;// = 1*4 bytes (4 = sizeof(float))
+	memcpy((uint8_t*) (dst + dst_pos), &mtr_counter, sizeof(uint32_t));
+	dst_pos += 1;// = 1*4 bytes (4 = sizeof(float))
+	memcpy((uint8_t*) (dst + dst_pos), &mtr_status, sizeof(uint32_t));
+	dst_pos += 1;// = 1*4 bytes (4 = sizeof(float))
+	out_buff->outdata_counter++;
+	out_buff->outdata_len[data_cnt] = 3; // 9 bytes occupy 3 floats (sizeof(float) = 4)
+	out_buff->data_id[data_cnt] = DT_PRESS_UNIT;
+	out_buff->group_index[data_cnt++] = 0;
+
+	out_buff->full_size += dst_pos;
+
+	press_unit_ready = PRESS_UNIT_NOT_READY;
+
+	//uint32_t tmp[1024];
+	//memcpy(&tmp[0], out_buff->out_data, dst_pos*sizeof(uint32_t));
+	//int tt = 0;
+}
+#endif
+
 void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 {
 	int i;
@@ -3085,6 +3279,7 @@ void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 			break;
 		}
 		case DT_GAMMA:
+		case DT_PRESS_UNIT:
 		{
 			uint16_t data_in_bytes = (uint16_t) (data_len * sizeof(float));
 			data_fin[index++] = (uint8_t) data_id;
@@ -3093,8 +3288,8 @@ void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
 			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
 
-			float *gl = (float*) (out_buff->out_data + pos);
-			float bb = *gl;
+			//float *gl = (float*) (out_buff->out_data + pos);
+			//float bb = *gl;
 			memcpy(&data_fin[index], (uint8_t*) (out_buff->out_data + pos), data_in_bytes);
 			pos += data_len;
 			index += data_in_bytes;
