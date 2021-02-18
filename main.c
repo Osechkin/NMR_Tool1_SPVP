@@ -1,6 +1,6 @@
 // NMR SPVP Logging Tool software
 // 13.02.2021
-//current version 0.1
+//current version 0.2
 
 #include <ti/pspiom/cslr/cslr.h>
 #include "upp/upp.h"
