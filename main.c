@@ -269,16 +269,24 @@ volatile uint8_t device_id; 								// идентификатор устройства, данные которого
 
 uint8_t pp_is_seq_done = 0;									// индикатор завершения последовательности по команде COM_STOP
 
+
+// Telemetric variables -------------------------------------------------------
+#ifdef USE_TELEMETRIC_UART
 uint8_t telemetric_data[TELEMETRIC_UART_BUF_LEN]; 			// контейнер для телеметрических данных
 volatile unsigned int UART_telemetric_counter = 0; 			// счетчик байт, приходящих от плат телеметрии
-volatile unsigned int UART_telemetric_counter2 = 0; 	    // счетчик байт, приходящих от плат телеметрии
 volatile unsigned int UART_telemetric_pack_counter = 0; 	// счетчик пакетов длиной TELEMETRIC_DATA_LEN байт, приходящих от плат телеметрии
 volatile unsigned int UART_telemetric_local_counter = 0; 	// локальный счетчик для подсчета данных внутри пакета
 volatile uint8_t telemetric_board_status = 0;
 volatile TelemetryState telemetry_ready = TELE_NOT_READY; 	// флаг готовности телеметрической информации
 
+volatile int temperature_mode = TEMP_MODE_UNKNOWN;			// тип прибора (KMRK, NMKT и SDSP имеют разный способ измерения температуры): 1 - KMRK, NMKT и другие; 2 - SPVP
+volatile int temp_request_mode = TEMP_NOT_DEFINED;			// 0 - исходное состояние, 1 - получен ответ на запуск измерения температуры, 2 - получены температуры (только для SPVP)
+volatile int temp_sensors = 0;								// количество сенсоров (только для SPVP)
+volatile int voltage_request_mode = VOLT_NOT_DEFINED;		// 0 - исходное состояние, 1 - запуск измерений напряжений, 2 - напряжения измерены (только для SPVP)
+#endif
+// ----------------------------------------------------------------------------
 
-// Pressure Unit variables ---------------------------------------------------
+// Pressure Unit variables ----------------------------------------------------
 #ifdef USE_PRESSURE_UNIT
 unsigned int press_unit_data;								// контейнер для данных прижимного устройства
 volatile PressureUnitState press_unit_ready = PRESS_UNIT_NOT_READY;	// флаг готовности измерить данные прижимного устройства
@@ -388,13 +396,13 @@ void main(void)
 
 	// Enable devices ---------------------------------------------------------
 	timerSettings.enabled = True;
-	enable_Timer(tmrRegs);
+	enable_Timer(tmrRegs);														printf("System timer was enabled.\n");
 
-	enable_UART(uartRegs);
+	enable_UART(uartRegs);														printf("UART1 for the cable communication was enabled.\n");
 
 #ifdef USE_TELEMETRIC_UART
 	memset(telemetric_data, 0x00, TELEMETRIC_UART_BUF_LEN);
-	enable_UART(uartRegs_Telemetric); 						// start operations on Telemetric UART
+	enable_UART(uartRegs_Telemetric); 											printf("UART2 for the Telemetric board was enabled.\n"); // start operations on Telemetric UART
 #endif
 	// ------------------------------------------------------------------------
 
@@ -410,21 +418,38 @@ void main(void)
 	// ------------------------------------------------------------------------
 
 	// init device settings ---------------------------------------------------
-	proger_stop();
-	device_serial = proger_rd_device_serial();
-	initDeviceSettings(device_serial);
+	//proger_stop();
+	//device_serial = proger_rd_device_serial();
+	//initDeviceSettings(device_serial);
 
-	main_proger_wr_pulseprog_default();
+	//main_proger_wr_pulseprog_default();
 	// ------------------------------------------------------------------------
 
 
 	//upp initialization ------------------------------------------------------
 	_disable_interrupts();
 	init_upp();																	printf("UPP was initialized.\n");
-	init_upp_ints(); 										// disable for upp_check_poll usage
-	_enable_interrupts();														printf("UPP system interrupts were enabled.\n");
+	init_upp_ints(); 															printf("UPP system interrupt was mapped to DSP INT%d.\n", INTC_UPP);	// disable for upp_check_poll usage
+	_enable_interrupts();
+	// ------------------------------------------------------------------------
 
 
+	// Set temperature Mode ---------------------------------------------------
+	proger_stop();
+	device_serial = proger_rd_device_serial();
+	initDeviceSettings(device_serial);
+	switch (device_serial)
+	{
+		case NMKT:
+		case KMRK:
+		case NMR_KERN: 	temperature_mode = TEMP_MODE_NOT_SPVP; break;
+		case SPVP:		temperature_mode = TEMP_MODE_SPVP; break;
+		default: break;
+	}
+
+	temperature_mode = TEMP_MODE_SPVP;		// temporary !!!
+
+	main_proger_wr_pulseprog_default();
 	// ------------------------------------------------------------------------
 
 
@@ -622,20 +647,45 @@ void main(void)
 			//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 			//memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
 
-
+			/*
 			//if (telemetry_ready == TELE_READY)
 			{
 				toMeasureTemperatures();
 				telemetry_ready = TELE_NOT_READY;
+			}*/
+#ifdef USE_TELEMETRIC_UART
+			if (telemetry_ready == TELE_NOT_READY)
+			{
+				temp_request_mode = TEMP_NOT_DEFINED;
+				voltage_request_mode = VOLT_NOT_DEFINED;
+				toMeasureTemperatures();
+				//telemetry_ready = TELE_READY;
+				//telemetry_ready = TELE_NOT_READY;
 			}
+#endif
 
-			uint8_t pg = (uint8_t) proger_rd_pwr_pg();
+/*			uint8_t pg = (uint8_t) proger_rd_pwr_pg();
 			uint8_t tele_flag = 0;
 			if (UART_telemetric_counter == TELEMETRIC_UART_BUF_LEN) tele_flag = 1;
 #ifdef USE_PRESSURE_UNIT
 			if (press_unit_ready == PRESS_UNIT_READY) tele_flag = 1;
+#endif */
+			unsigned int tele_flag = 0;
+#ifdef USE_TELEMETRIC_UART
+			if (temperature_mode == TEMP_MODE_NOT_SPVP) if (UART_telemetric_counter % TELEMETRIC_DATA_LEN == 0 && UART_telemetric_counter > 0) tele_flag = 1;
+			else if (temperature_mode == TEMP_MODE_SPVP)
+			{
+				if (temp_request_mode == TEMP_READY || voltage_request_mode == VOLT_READY)
+				{
+					tele_flag = 1;
+				}
+			}
+#endif
+#ifdef USE_PRESSURE_UNIT
+			if (press_unit_ready == PRESS_UNIT_READY) tele_flag = 1;
 #endif
 
+			uint8_t pg = (uint8_t) proger_rd_pwr_pg();
 			uint8_t pp_is_started  = proger_is_started();
 			pp_is_seq_done = proger_is_seq_done();
 			uint8_t out_mask = pg | (tele_flag << 1) | (pp_is_started << 2) | (pp_is_seq_done << 3);
@@ -1151,14 +1201,17 @@ void main(void)
 		}
 
 		//if (incom_msg_state == NOT_DEFINED && tool_state != BUSY)
-		if (incom_msg_state == NOT_DEFINED && tool_state == FREE)
+		/*if (incom_msg_state == NOT_DEFINED && tool_state == FREE)
 		{
-			if (telemetry_ready == TELE_READY)
+			if (telemetry_ready == TELE_NOT_READY && temp_request_mode == TEMP_NOT_DEFINED)
 			{
+				temp_request_mode = TEMP_NOT_DEFINED;
+				voltage_request_mode = VOLT_NOT_DEFINED;
 				toMeasureTemperatures();
-				telemetry_ready = TELE_NOT_READY;
+
+				//telemetry_ready = TELE_NOT_READY;
 			}
-		}
+		}*/
 
 		//uint8_t pp_is_started  = proger_is_started();
 		uint8_t _pp_is_seq_done = proger_is_seq_done();
@@ -1378,9 +1431,9 @@ void executeShortMsg(MsgHeader *_msg_header)
 	case GET_DATA:
 	{
 		if (tool_state == UNKNOWN_STATE) return;
-		if (fpga_prg_started == False && UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0) return;
+		//if (fpga_prg_started == False && UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0) return;
+		if (temperature_mode == TEMP_MODE_SPVP && fpga_prg_started == False && telemetry_ready == TELE_NOT_READY) return;
 
-		/* 	Commented temporary !
 		Bool to_out = (fpga_prg_started == False);
 #ifdef USE_TELEMETRIC_UART
 		if (temperature_mode == TEMP_MODE_NOT_SPVP) to_out = to_out && (UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0);
@@ -1402,7 +1455,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 		to_out = to_out && (attempts_cnt == 0);
 #endif
 		if (to_out) return;
-		*/
 
 		//printf("Get Data !\n");
 
@@ -1425,7 +1477,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 		setupDDR2Cache();
 		enableCacheL1();
 
-		/* Commented temporary !
 #ifdef USE_TELEMETRIC_UART
 		if (telemetry_ready == TELE_READY)
 		{
@@ -1439,8 +1490,8 @@ void executeShortMsg(MsgHeader *_msg_header)
 			pressureUnitDataToOutput(output_data);
 		}
 #endif
-*/
-		telemetryDataToOutput(output_data);
+
+		//telemetryDataToOutput(output_data);
 		summationDataToOutput(output_data, summ_data);
 		prepareOutputByteArray(output_data, summ_data);
 
@@ -1699,7 +1750,7 @@ void executeShortMsg(MsgHeader *_msg_header)
 		//res = proger_cmd_mtr(CMD_MOTOR_STOP);
 		unsigned char cmd_mtr_state = proger_read_mtr_status();
 
-		clocker4->max_val = 10000;
+		clocker4->max_val = 3000;
 		startClocker(clocker4);
 		incom_msg_state = NOT_DEFINED;
 		//printf("STOP! Motor status : %X\n", cmd_mtr_state);
@@ -2043,7 +2094,7 @@ void create_Clockers(void)
 	// create clocker for telemetry measurements (delay between measurements)
 	clocker4 = (Clocker*) malloc(sizeof(Clocker));
 	clockers[4] = clocker4;
-	initClocker(10000, clocker4_ISR, clocker4);
+	initClocker(3000, clocker4_ISR, clocker4);
 
 	// create clocker for SDSP measurements (delay for measurements)
 	clocker5 = (Clocker*) malloc(sizeof(Clocker));
@@ -2236,38 +2287,98 @@ interrupt void GPIO_isr(void)
 
 interrupt void UART_Telemitric_isr(void)
 {
+#ifdef USE_TELEMETRIC_UART
 	uint8_t byte;
 
-	uartStatus = read_UART(uartRegs_Telemetric, &byte);
+	int uartStatus = read_UART(uartRegs_Telemetric, &byte);
 	if (uartStatus == E_OK)
 	{
-		if (UART_telemetric_counter >= TELEMETRIC_UART_BUF_LEN)
+		if (temperature_mode == TEMP_MODE_NOT_SPVP)
 		{
-			telemetric_board_status = 0;
-			UART_telemetric_counter = 0;
-			UART_telemetric_local_counter = 0;
+			if (UART_telemetric_counter >= TELEMETRIC_UART_BUF_LEN)
+			{
+				telemetric_board_status = 0;
+				UART_telemetric_counter = 0;
+				UART_telemetric_local_counter = 0;
+			}
+			if (UART_telemetric_local_counter >= TELEMETRIC_DATA_LEN) UART_telemetric_local_counter = 0;
+
+			int pos = TELEMETRIC_DATA_LEN * (UART_telemetric_pack_counter - 1) + UART_telemetric_local_counter;
+			UART_telemetric_local_counter++;
+			UART_telemetric_counter++;
+
+			switch (UART_telemetric_pack_counter)
+			{
+			case 1: // DU board
+				telemetric_board_status |= 1;
+				break;
+			case 2: // TU board
+				telemetric_board_status |= 2;
+				break;
+			case 3: // PU board
+				telemetric_board_status |= 4;
+				break;
+			}
+
+			telemetric_data[pos] = byte;
 		}
-		if (UART_telemetric_local_counter >= TELEMETRIC_DATA_LEN) UART_telemetric_local_counter = 0;
-
-		int pos = TELEMETRIC_DATA_LEN * (UART_telemetric_pack_counter - 1) + UART_telemetric_local_counter;
-		UART_telemetric_local_counter++;
-		UART_telemetric_counter++;
-
-		switch (UART_telemetric_pack_counter)
+		else if (temperature_mode == TEMP_MODE_SPVP)
 		{
-		case 1: // DU board
-			telemetric_board_status |= 1;
-			break;
-		case 2: // TU board
-			telemetric_board_status |= 2;
-			break;
-		case 3: // PU board
-			telemetric_board_status |= 4;
-			break;
-		}
+			if (temp_request_mode == TEMP_NOT_DEFINED && byte == 1)
+			{
+				dummyDelay(1000);
+				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'f');
+				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'f');
+				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
 
-		telemetric_data[pos] = byte;
+				temp_request_mode = TEMP_STARTED;
+				temp_sensors = 0;
+				UART_telemetric_counter = 0;
+				UART_telemetric_local_counter = 0;
+			}
+			else if (temp_request_mode == TEMP_STARTED)
+			{
+				temp_sensors = byte;
+				temp_request_mode = TEMP_COUNTED;
+			}
+			else if (temp_request_mode == TEMP_COUNTED && temp_sensors > 0)
+			{
+				telemetric_data[UART_telemetric_counter++] = byte;
+				UART_telemetric_local_counter++;
+			}
+
+			if (UART_telemetric_local_counter == 2*temp_sensors && temp_request_mode == TEMP_COUNTED)
+			{
+				temp_request_mode = TEMP_READY;		// прием температур завершен!
+				UART_telemetric_local_counter = 0;
+
+				// измерение напряжений
+				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'v');
+				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'f');
+				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'f');
+				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+				voltage_request_mode = VOLT_STARTED;
+				return;
+			}
+
+			if (voltage_request_mode == VOLT_STARTED && UART_telemetric_local_counter < 8)
+			{
+				telemetric_data[UART_telemetric_counter++] = byte;
+				UART_telemetric_local_counter++;
+				//printf("Byte: %d\n", byte);
+			}
+
+			if (voltage_request_mode == VOLT_STARTED && UART_telemetric_local_counter == 8)
+			{
+				voltage_request_mode = VOLT_READY;		// прием напряжений завершен!
+				UART_telemetric_local_counter = 0;
+				//printf("Bytes totally: %d\n", UART_telemetric_counter);
+				telemetry_ready = TELE_READY;
+			}
+		}
 	}
+#endif
 }
 
 void app_clocker_ISR(void)
@@ -2313,45 +2424,47 @@ void clocker3_ISR(void)
 	{
 		uint8_t pg = (uint8_t) proger_rd_pwr_pg();
 		uint8_t tele_flag = 0;
-		//if (UART_telemetric_counter == TELEMETRIC_UART_BUF_LEN) tele_flag = 1;
-		if (UART_telemetric_counter % TELEMETRIC_DATA_LEN == 0 && UART_telemetric_counter > 0) tele_flag = 1;
-		/*uint8_t out_mask = pg | (tele_flag << 1);
-		switch (out_mask)
+#ifdef USE_TELEMETRIC_UART
+		if (temperature_mode == TEMP_MODE_NOT_SPVP)
 		{
-		case 0:		sendByteArray(&NMRTool_Ready_PowerLow[0], SRV_MSG_LEN + 2, uartRegs); break;
-		case 1:		sendByteArray(&NMRTool_Ready_PowerOK[0], SRV_MSG_LEN + 2, uartRegs); break;
-		case 2:		sendByteArray(&NMRTool_Ready_PowerLow_T[0], SRV_MSG_LEN + 2, uartRegs); break;
-		case 3:		sendByteArray(&NMRTool_Ready_PowerOK_T[0], SRV_MSG_LEN + 2, uartRegs); break;
+			if (UART_telemetric_counter % TELEMETRIC_DATA_LEN == 0 && UART_telemetric_counter > 0) tele_flag = 1;
 		}
-		*/
-
+		if (temperature_mode == TEMP_MODE_SPVP)
+		{
+			if (temp_request_mode == TEMP_READY || voltage_request_mode == VOLT_READY)
+			{
+				tele_flag = 1;
+			}
+		}
+#endif
 #ifdef USE_PRESSURE_UNIT
 		if (press_unit_ready == PRESS_UNIT_READY) tele_flag = 1;
 		//press_unit_ready = PRESS_UNIT_NOT_READY;
 #endif
-
 		uint8_t pp_is_started  = proger_is_started();
-		//pp_is_seq_done = proger_is_seq_done();
+		uint8_t pp_is_seq_done = proger_is_seq_done();
 		uint8_t out_mask = pg | (tele_flag << 1) | (pp_is_started << 2) | (pp_is_seq_done << 3);
 		sendByteArray(NMRTool_Ready[out_mask], SRV_MSG_LEN + 2, uartRegs);
-		pp_is_seq_done = proger_is_seq_done();
-
+		//pp_is_seq_done = proger_is_seq_done();
 	}
 	startClocker(clocker3);
 }
 
 void clocker4_ISR(void)
 {
+#ifdef USE_TELEMETRIC_UART
 	//if (incom_msg_state == NOT_DEFINED)
 	{
-		//toMeasureTemperatures();
-		telemetry_ready = TELE_READY;
+		temp_request_mode = TEMP_NOT_DEFINED;
+		voltage_request_mode = VOLT_NOT_DEFINED;
+		toMeasureTemperatures();
+		//telemetry_ready = TELE_READY;
+		telemetry_ready = TELE_NOT_READY;
 	}
-
+#endif
 #ifdef USE_PRESSURE_UNIT
 	press_unit_ready = PRESS_UNIT_READY;
 #endif
-
 	startClocker(clocker4);
 }
 
@@ -2537,64 +2650,106 @@ void summationDataToOutput(OutBuffer *out_buff, SummationBuffer *sum_buff)
 	out_buff->outdata_counter++;
 }
 
+#ifdef USE_TELEMETRIC_UART
 void telemetryDataToOutput(OutBuffer *out_buff)
 {
-	/*if (UART_telemetric_counter != TELEMETRIC_UART_BUF_LEN)
-	 {
-	 memset(&telemetric_data[0], 0x0, UART_telemetric_counter * sizeof(uint8_t));
-	 UART_telemetric_counter = 0;
-	 telemetry_ready = TELE_NOT_READY;
-	 return;
-	 }*/
-
-	float *dst = output_data->out_data;
-	int dst_pos = output_data->full_size;
-	int data_cnt = output_data->outdata_counter;
+	float *dst = out_buff->out_data;
+	int dst_pos = out_buff->full_size;
+	int data_cnt = out_buff->outdata_counter;
 	//memcpy((uint8_t*)dst + dst_pos, &telemetric_data[0], TELEMETRIC_UART_BUF_LEN * sizeof(uint8_t));
 
-	if ((telemetric_board_status & 0x01) == 1)
+	if (temperature_mode == TEMP_MODE_NOT_SPVP)
 	{
-		memcpy((uint8_t*) (dst + dst_pos), &telemetric_data[0], TELEMETRIC_DATA_LEN * sizeof(uint8_t));
-		output_data->outdata_counter++;
-		output_data->outdata_len[data_cnt] = 3; // 9 bytes occupy 3 floats (sizeof(float) = 4)
-		output_data->data_id[data_cnt] = DT_DU;
-		output_data->channel_id[data_cnt] = 0xFF;
-		output_data->group_index[data_cnt++] = 0;
-		dst_pos += 3;// = 3*4 bytes (4 = sizeof(float))
-	}
-	telemetric_board_status >>= 1;
+		if ((telemetric_board_status & 0x01) == 1)
+		{
+			memcpy((uint8_t*) (dst + dst_pos), &telemetric_data[0], TELEMETRIC_DATA_LEN * sizeof(uint8_t));
+			out_buff->outdata_counter++;
+			out_buff->outdata_len[data_cnt] = 3; // 9 bytes occupy 3 floats (sizeof(float) = 4)
+			out_buff->data_id[data_cnt] = DT_DU;
+			out_buff->group_index[data_cnt++] = 0;
+			dst_pos += 3;// = 3*4 bytes (4 = sizeof(float))
+		}
+		telemetric_board_status >>= 1;
 
-	if ((telemetric_board_status & 0x01) == 1)
+		if ((telemetric_board_status & 0x01) == 1)
+		{
+			memcpy((uint8_t*) (dst + dst_pos), &telemetric_data[TELEMETRIC_DATA_LEN], TELEMETRIC_DATA_LEN * sizeof(uint8_t));
+			out_buff->outdata_counter++;
+			out_buff->outdata_len[data_cnt] = 3;
+			out_buff->data_id[data_cnt] = DT_TU;
+			out_buff->group_index[data_cnt++] = 0;
+			dst_pos += 3; // = 3*4 bytes (4 = sizeof(float))
+		}
+		telemetric_board_status >>= 1;
+
+		if ((telemetric_board_status & 0x01) == 1)
+		{
+			memcpy((uint8_t*) (dst + dst_pos), &telemetric_data[2*TELEMETRIC_DATA_LEN], TELEMETRIC_DATA_LEN * sizeof(uint8_t));
+			out_buff->outdata_counter++;
+			out_buff->outdata_len[data_cnt] = 3;
+			out_buff->data_id[data_cnt] = DT_PU;
+			out_buff->group_index[data_cnt++] = 0;
+			dst_pos += 3; // = 3*4 bytes (4 = sizeof(float))
+		}
+		telemetric_board_status = 0;
+
+		out_buff->full_size += dst_pos;
+
+		memset(&telemetric_data[0], 0x0, TELEMETRIC_UART_BUF_LEN * sizeof(uint8_t));
+	}
+	else if (temperature_mode == TEMP_MODE_SPVP)
 	{
-		memcpy((uint8_t*) (dst + dst_pos), &telemetric_data[TELEMETRIC_DATA_LEN], TELEMETRIC_DATA_LEN * sizeof(uint8_t));
-		output_data->outdata_counter++;
-		output_data->outdata_len[data_cnt] = 3;
-		output_data->data_id[data_cnt] = DT_TU;
-		output_data->channel_id[data_cnt] = 0xFF;
-		output_data->group_index[data_cnt++] = 0;
-		dst_pos += 3; // = 3*4 bytes (4 = sizeof(float))
+		//if ((telemetric_board_status & 0x01) == 1)
+		if (temp_request_mode == TEMP_READY)
+		{
+			uint16_t cnt = 0;
+			uint16_t sensors = temp_sensors;
+			uint8_t temp[TELEMETRIC_UART_BUF_LEN2+sizeof(uint16_t)];	// let's enable up to 12 temperature meters, also 2 bytes for the number of temperature meters
+			memset(&temp[0], 0x00, TELEMETRIC_UART_BUF_LEN2*sizeof(uint8_t));
+			memcpy(&temp[cnt], &sensors, sizeof(uint16_t));
+			cnt += 1*sizeof(uint16_t);
+			memcpy((uint8_t*) (&temp[cnt]), &telemetric_data[0], 2*sensors*sizeof(uint8_t));
+			cnt += 2*sensors*sizeof(uint8_t);
+			memcpy((uint8_t*) (dst + dst_pos), &temp[0], cnt);
+			out_buff->outdata_counter++;
+			out_buff->outdata_len[data_cnt] = (uint16_t)((cnt+(sizeof(float)-1))/sizeof(float)); // the number of float values
+			out_buff->data_id[data_cnt] = DT_T;
+			out_buff->group_index[data_cnt++] = 0;
+			dst_pos += (uint16_t)((cnt+(sizeof(float)-1))/sizeof(float));
+			//dst_pos += 5;// = (2*sensors(up to 8) + 4) bytes / sizeof(float)
+		}
+		if (voltage_request_mode == VOLT_READY)
+		{
+			uint16_t cnt = 0;
+			uint16_t sensors = 4;			// 4 voltage meters
+			uint8_t temp[TELEMETRIC_UART_BUF_LEN2+sizeof(uint16_t)]; // 8 bytes of 4 voltage sensors * sizeof(uint16_t) + the number of sensors (4 totally)
+			memset(&temp[0], 0x00, (sensors*sizeof(uint16_t)+sizeof(uint16_t)));
+			memcpy(&temp[cnt], &sensors, sizeof(uint16_t));
+			cnt += 1*sizeof(uint16_t);
+			memcpy((uint8_t*) (&temp[cnt]), &telemetric_data[2*temp_sensors], sensors*sizeof(uint16_t));
+			cnt += sensors*sizeof(uint16_t);
+			memcpy((uint8_t*) (dst + dst_pos), &temp[0], cnt*sizeof(uint8_t));
+			out_buff->outdata_counter++;
+			//out_buff->outdata_len[data_cnt] = 3; 	// 4 bytes for number '4' (int) and 8 bytes of voltage data occupy 3 elements of type 'float'
+			out_buff->outdata_len[data_cnt] = (uint16_t)((cnt+(sizeof(float)-1))/sizeof(float));
+			out_buff->data_id[data_cnt] = DT_U;
+			out_buff->group_index[data_cnt++] = 0;
+			//dst_pos += 3;							// = (4 + 2*4 bytes)/sizeof(float)
+			dst_pos += (uint16_t)((cnt+(sizeof(float)-1))/sizeof(float));
+		}
+
+		telemetric_board_status = 0;
+
+		out_buff->full_size += dst_pos;
+
+		memset(&telemetric_data[0], 0x0, TELEMETRIC_UART_BUF_LEN2 * sizeof(uint8_t));
 	}
-	telemetric_board_status >>= 1;
 
-	if ((telemetric_board_status & 0x01) == 1)
-	{
-		memcpy((uint8_t*) (dst + dst_pos), &telemetric_data[2*TELEMETRIC_DATA_LEN], TELEMETRIC_DATA_LEN * sizeof(uint8_t));
-		output_data->outdata_counter++;
-		output_data->outdata_len[data_cnt] = 3;
-		output_data->data_id[data_cnt] = DT_PU;
-		output_data->channel_id[data_cnt] = 0xFF;
-		output_data->group_index[data_cnt++] = 0;
-		dst_pos += 3; // = 3*4 bytes (4 = sizeof(float))
-	}
-	telemetric_board_status = 0;
-
-	output_data->full_size += dst_pos;
-
-	memset(&telemetric_data[0], 0x0, TELEMETRIC_UART_BUF_LEN * sizeof(uint8_t));
 	UART_telemetric_counter = 0;
 	UART_telemetric_pack_counter = 0;
 	telemetry_ready = TELE_NOT_READY;
 }
+#endif
 
 #ifdef USE_PRESSURE_UNIT
 void pressureUnitDataToOutput(OutBuffer *out_buff)
@@ -2896,6 +3051,53 @@ void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 			 data_fin[index++] = 0x53;
 			 data_fin[index++] = 0x35;
 			 }*/
+			data_fin_counter = index;
+
+			break;
+		}
+		case DT_T:
+		{
+			uint8_t temp[100];
+			memcpy(&temp[0], out_buff->out_data, 100);
+			if (temperature_mode != TEMP_MODE_SPVP) return;
+			data_fin[index++] = (uint8_t) data_id;
+			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
+			data_fin[index++] = (uint8_t) ((group_index >> 8) & 0x00FF);
+
+			int sensors = *(uint8_t*)(out_buff->out_data+pos);
+			//pos++;
+			uint16_t data_in_bytes =  2*sensors;
+			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
+			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
+
+			memcpy(&data_fin[index], (uint8_t*) (out_buff->out_data + pos) + 2, data_in_bytes);
+			//pos += 4;			// 8 sensors * 2 bytes / sizeof(float)
+			pos += (2*sensors+2+(sizeof(float)-1))/sizeof(float);
+			index += data_in_bytes;		// 8 sensors * 2 bytes
+			if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
+
+			data_fin_counter = index;
+
+			break;
+		}
+		case DT_U:
+		{
+			if (temperature_mode != TEMP_MODE_SPVP) return;
+			data_fin[index++] = (uint8_t) data_id;
+			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
+			data_fin[index++] = (uint8_t) ((group_index >> 8) & 0x00FF);
+
+			int sensors = *(uint8_t*)(out_buff->out_data+pos);
+			uint16_t data_in_bytes = 2*sensors;
+			//pos++;
+			data_fin[index++] = (uint8_t) (data_in_bytes & 0x00FF);
+			data_fin[index++] = (uint8_t) ((data_in_bytes >> 8) & 0x00FF);
+
+			memcpy(&data_fin[index], (uint8_t*) (out_buff->out_data + pos)+2, data_in_bytes);
+			pos += (data_in_bytes + 2 + (sizeof(float)-1))/sizeof(float);
+			index += data_in_bytes;
+			if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
+
 			data_fin_counter = index;
 
 			break;
@@ -3361,82 +3563,98 @@ void toMeasureTemperatures()
 	UART_telemetric_counter = 0;
 	UART_telemetric_pack_counter = 0;
 	telemetric_board_status = 0;
-	memset(&telemetric_data[0], 0x0, TELEMETRIC_UART_BUF_LEN * sizeof(uint8_t));
 
-	// DU Board
-	// Temperature channel 0
-	UART_telemetric_pack_counter++;
-	UART_telemetric_local_counter = 0;
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	//proger_restart_time_counter();
-	dummyDelay(100);
-	//volatile int tt = proger_read_time_counter();
+	if (temperature_mode == TEMP_MODE_NOT_SPVP)	// KMRK, NMKT и другие кроме SPVP
+	{
+		memset(&telemetric_data[0], 0x0, TELEMETRIC_UART_BUF_LEN * sizeof(uint8_t));
 
-	// Temperature channel 1
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	dummyDelay(100);
+		// DU Board
+		// Temperature channel 0
+		UART_telemetric_pack_counter++;
+		UART_telemetric_local_counter = 0;
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		//proger_restart_time_counter();
+		dummyDelay(100);
+		//volatile int tt = proger_read_time_counter();
 
-	// Temperature channel 2
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	dummyDelay(1000);
+		// Temperature channel 1
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(100);
 
-	// TU Board
-	// Temperature channel 0
-	UART_telemetric_pack_counter++;
-	UART_telemetric_local_counter = 0;
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	dummyDelay(100);
+		// Temperature channel 2
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(100);
 
-	// Temperature channel 1
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	dummyDelay(100);
+		// TU Board
+		// Temperature channel 0
+		UART_telemetric_pack_counter++;
+		UART_telemetric_local_counter = 0;
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(100);
 
-	// Temperature channel 2
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	dummyDelay(100);
+		// Temperature channel 1
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(100);
 
-	// PU Board
-	// Temperature channel 0
-	UART_telemetric_pack_counter++;
-	UART_telemetric_local_counter = 0;
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	dummyDelay(100);
+		// Temperature channel 2
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(100);
 
-	// Temperature channel 1
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	dummyDelay(100);
+		// PU Board
+		// Temperature channel 0
+		UART_telemetric_pack_counter++;
+		UART_telemetric_local_counter = 0;
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(100);
 
-	// Temperature channel 2
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
-	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
-	dummyDelay(100);
-	dummyDelay(100);
+		// Temperature channel 1
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '1');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(100);
+
+		// Temperature channel 2
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '2');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(100);
+	}
+	else if (temperature_mode == TEMP_MODE_SPVP)	// SPVP only
+	{
+		memset(&telemetric_data[0], 0x0, TELEMETRIC_UART_BUF_LEN2 * sizeof(uint8_t));
+
+		// Temperature channel 0
+		UART_telemetric_pack_counter++;
+		UART_telemetric_local_counter = 0;
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'c');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
+		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+		dummyDelay(1000);
+	}
 }
 
 void initDeviceSettings(uint8_t device)
