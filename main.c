@@ -2761,7 +2761,7 @@ void pressureUnitDataToOutput(OutBuffer *out_buff)
 	unsigned char adc_channel = 0;
 	int adc_status = proger_mtr_adc_start_conversion();
 	int cnt = 0;
-	while (adc_status == 0)
+	/*while (adc_status == 0)
 	{
 		adc_status = proger_read_mtr_adc_status();
 		dummyDelay(1);
@@ -2769,8 +2769,9 @@ void pressureUnitDataToOutput(OutBuffer *out_buff)
 	}
 	printf("Dummy delays count = %d", cnt);
 	//int adc_status = proger_mtr_adc_start_conversion();
+	 */
 
-	dummyDelay(5000);
+	dummyDelay(100);
 	unsigned int mtr_adc_value = proger_read_mtr_adc_value (adc_channel);
 	signed int mtr_counter = proger_read_counter_mtr ();
 	unsigned int mtr_status = proger_read_mtr_status ();
