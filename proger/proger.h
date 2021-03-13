@@ -17,6 +17,7 @@ void proger_start ();
 
 unsigned int proger_rd_reg_32 (unsigned int adr);
 unsigned int proger_wr_reg_32 (unsigned int adr, unsigned int data);
+unsigned int proger_wr_reg_8  (unsigned int adr, unsigned char data);
 
 unsigned int proger_read_time_counter ();
 unsigned int proger_restart_time_counter ();

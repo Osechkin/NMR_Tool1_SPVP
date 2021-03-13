@@ -54,6 +54,20 @@ unsigned int proger_wr_reg_32 (unsigned int adr, unsigned int data)
 }// proger_wr_reg_32
 /*---------------------------------------------------------------------------*/
 
+unsigned int proger_wr_reg_8 (unsigned int adr, unsigned char data)
+{
+	volatile unsigned char *proger_adr;
+	volatile unsigned char data_wr;
+
+	proger_adr = (unsigned char *) adr;
+	data_wr    = data;
+
+	*proger_adr = data_wr;
+
+	return (data);
+}// proger_wr_reg_8
+/*---------------------------------------------------------------------------*/
+
 unsigned int proger_read_time_counter ()
 {
 	volatile unsigned int clks;
@@ -612,8 +626,8 @@ signed int proger_read_counter_mtr (void)
 
 unsigned char proger_mtr_adc_start_conversion(void)
 {
-	volatile unsigned char status;
-	proger_wr_reg_32 (MEM_ADDR_MTR_ADC_CTRL_1, 0x01);
+	volatile unsigned char status = 1;
+	proger_wr_reg_8 (MEM_ADDR_MTR_ADC_CTRL_1, /*0xFFFFFFFF(unsigned char)*/ status);
 
 	return proger_read_mtr_adc_status();
 }

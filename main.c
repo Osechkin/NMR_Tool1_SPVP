@@ -2079,7 +2079,7 @@ void create_Clockers(void)
 	// create UART message clockers (for header trapping)
 	clocker1 = (Clocker*) malloc(sizeof(Clocker));
 	clockers[1] = clocker1;
-	initClocker(100, clocker1_ISR, clocker1); // it was 20
+	initClocker(300, clocker1_ISR, clocker1); // it was 20
 
 	// create UART message clockers (for packet trapping)
 	clocker2 = (Clocker*) malloc(sizeof(Clocker));
@@ -2229,6 +2229,10 @@ interrupt void UART_isr(void)
 					flag = True;
 					startClocker(clocker1);
 				}
+				if (byte == STOP_BYTE)		// иногда ловится только последний байт сообщения
+				{
+					flag = True;
+				}
 			}
 			else if (msg_header_state == STARTED)
 			{
@@ -2246,7 +2250,7 @@ interrupt void UART_isr(void)
 
 			if (flag == False) QUEUE8_put(byte, uart_queue);
 
-			cnt_uart_isr++;
+			//cnt_uart_isr++;
 		}
 		dataUnavailable = FALSE;
 	}
@@ -2754,7 +2758,19 @@ void telemetryDataToOutput(OutBuffer *out_buff)
 #ifdef USE_PRESSURE_UNIT
 void pressureUnitDataToOutput(OutBuffer *out_buff)
 {
-	int adc_channel = 0;
+	unsigned char adc_channel = 0;
+	int adc_status = proger_mtr_adc_start_conversion();
+	int cnt = 0;
+	while (adc_status == 0)
+	{
+		adc_status = proger_read_mtr_adc_status();
+		dummyDelay(1);
+		cnt++;
+	}
+	printf("Dummy delays count = %d", cnt);
+	//int adc_status = proger_mtr_adc_start_conversion();
+
+	dummyDelay(5000);
 	unsigned int mtr_adc_value = proger_read_mtr_adc_value (adc_channel);
 	signed int mtr_counter = proger_read_counter_mtr ();
 	unsigned int mtr_status = proger_read_mtr_status ();
