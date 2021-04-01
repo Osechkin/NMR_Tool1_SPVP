@@ -2758,18 +2758,8 @@ void telemetryDataToOutput(OutBuffer *out_buff)
 #ifdef USE_PRESSURE_UNIT
 void pressureUnitDataToOutput(OutBuffer *out_buff)
 {
-	unsigned char adc_channel = 0;
+	unsigned char adc_channel = 1;
 	int adc_status = proger_mtr_adc_start_conversion();
-	int cnt = 0;
-	/*while (adc_status == 0)
-	{
-		adc_status = proger_read_mtr_adc_status();
-		dummyDelay(1);
-		cnt++;
-	}
-	printf("Dummy delays count = %d", cnt);
-	//int adc_status = proger_mtr_adc_start_conversion();
-	 */
 
 	dummyDelay(100);
 	unsigned int mtr_adc_value = proger_read_mtr_adc_value (adc_channel);
