@@ -2,41 +2,47 @@
 // 13.02.2021
 //current version 0.2
 
-#include <ti/pspiom/cslr/cslr.h>
+//#include <ti/pspiom/cslr/cslr.h>
+
+#include "time.h"
+
+#include "Timer/clocker_drv.h"
+#include "Timer/timer_drv.h"
+
 #include "upp/upp.h"
+
 #include "proger/proger.h"
+
+#include "GPIO/gpioMux.h"
+#include "GPIO/gpio.h"
+
 #include "uart_hduplex/uart_hduplex.h"
+#include "UART/uart_messages.h"
+#include "UART/UART_drv.h"
+
 #include "spi/spi.h"
 
+#include "Math/nmr_math.h"
+#include "Math/data_processing.h"
+
 //----------------------------------------------
+/*
 #include <stdio.h>
 #include <stdlib.h>
 #include "math.h"
 #include <c6x.h>
+*/
 
 #include "common_data.h"
 
 #include "Common/OMAPL138_global.h"
 
-#include "UART/uart_messages.h"
-#include "UART/UART_drv.h"
-
-#include "Timer/clocker_drv.h"
-#include "Timer/timer_drv.h"
-
 #include "PSC/psc.h"
 #include "soc_C6748.h"
-
-#include "GPIO/gpioMux.h"
-#include "GPIO/gpio.h"
 
 #include "Galois/rscoding.h"
 #include "Galois/gf_data.h"
 
-#include "Math/nmr_math.h"
-#include "Math/data_processing.h"
-
-#include "time.h"
 
 
 
@@ -93,7 +99,6 @@ void initDeviceSettings(uint8_t device);
 Bool loadDeviceSettings(int *data, int len);
 void create_Clockers(void);
 void onDataAvailable(QUEUE8* bytes);
-//void onRingDataAvailable(int from, int to, uint8_t *ring);
 void executeServiceMsg(MsgHeader *_msg_header);
 void executeShortMsg(MsgHeader *_msg_header);
 void executeMultypackMsg(UART_Message *uart_msg);
@@ -120,8 +125,6 @@ void toMeasureTemperatures();
 void setDefaultCommSettings();
 //-----------------------------------------------------------------------------
 
-//-----------------------------------------------------------------------------
-static int cnt_uart_isr = 0;
 
 //upp vars and functions -------------------------------------------------------
 volatile unsigned int reg1 = 0, reg2 = 0, reg3 = 0;
@@ -133,7 +136,7 @@ volatile Bool modulesEnabled;
 volatile unsigned int pins_reg = 0, pins_reg_prev = 0;
 volatile uint8_t pins_cmd = 0xFF, led_pin15 = 0;
 
-volatile Bool upp_resetted = false;
+volatile Bool upp_resetted = FALSE;
 
 CSL_UppRegsOvly UPP0Regs = (CSL_UppRegsOvly) (CSL_UPP_0_REGS);
 CSL_UppRegsOvly UPPRegs;
@@ -347,6 +350,58 @@ void main(void)
 	// ------------------------------------------------------------------------
 
 
+	// GPIO system settings and Initialization ------------------------------------------
+	modulesEnabled = FALSE;
+
+	// Ensure previous initiated transitions have finished
+	if(check_psc_transition(CSL_PSC_1) == pscTimeout) return;
+
+	// Enable peripherals; Initiate transition
+	//CSL_FINST(psc1Regs->MDCTL[CSL_PSC_GPIO], PSC_MDCTL_NEXT, ENABLE);
+	//CSL_FINST(psc1Regs->PTCMD, PSC_PTCMD_GO0, SET);
+
+	// Ensure previous initiated transitions have finished
+	if(check_psc_transition(CSL_PSC_1) == pscTimeout) return;
+
+	// Ensure modules enabled
+	if(check_psc_MDSTAT(CSL_PSC_1, CSL_PSC_GPIO, CSL_PSC_MDSTAT_STATE_ENABLE) == pscTimeout) return;
+	modulesEnabled = TRUE;
+
+	int control_pins = 12;
+	int *pins = (int*) calloc(control_pins, sizeof(int));
+	pins[0] = GP_1; 										// GPIO[1] Bank0
+	pins[1] = GP_2; 										// GPIO[2] Bank0
+	pins[2] = GP_3; 										// GPIO[3] Bank0
+	pins[3] = GP_4; 										// GPIO[4] Bank0
+	pins[4] = GP_5; 										// GPIO[5] Bank0
+	pins[5] = GP_6; 										// GPIO[6] Bank0
+	pins[6] = GP_7; 										// GPIO[7] Bank0
+	pins[7] = GP_8; 										// GPIO[8] Bank0
+	pins[8] = GP_9; 										// GPIO[9] Bank0
+	pins[9] = GP_10; 										// GPIO[10] Bank0
+	pins[10] = GP_11; 										// GPIO[11] Bank0
+	pins[11] = GP_12; 										// GPIO[12] Bank0
+	enableGPIOPinMux_Bank0(pins, control_pins, sysRegs);
+
+	gpioPowerOn(psc1Regs); 									// Set power on the GPIO module in the power sleep controller
+	int i;
+	int *pin_dirs = (int*) calloc(control_pins, sizeof(int));
+	for (i = 0; i < control_pins; i++)
+	{
+		pin_dirs[i] = CSL_GPIO_DIR_DIR_IN;
+	}
+	configureGPIOPins_Bank0(pins, pin_dirs, control_pins, gpioRegs);	// Configure GPIO pins in Bank0 for output
+
+	int *pin_states = (int*) calloc(3, sizeof(int));
+	pin_states[0] = GPIO_FAL_AND_RIS;
+	pin_states[1] = GPIO_FAL_AND_RIS;
+	pin_states[2] = GPIO_FAL_AND_RIS;
+	configureGPIOInterrupts_Bank0(pins, pin_states, 3, gpioRegs); // Enable GPIO interrupt (Bank0) for rising and falling
+
+	mapGPIOInterrupt_Bank0(INTC_GPIO, dspintcRegs); 		// map GPIO events to INTC5
+	// ----------------------------------------------------------------------------------
+
+
 	// UART initialization ----------------------------------------------------
 	uartSettings.BaudRate = 115200;
 	uartSettings.DataBits = 8;
@@ -406,6 +461,7 @@ void main(void)
 #endif
 	// ------------------------------------------------------------------------
 
+	/*
 	// GPIO
 	PSCModuleControl(SOC_PSC_1_REGS, HW_PSC_GPIO, PSC_POWERDOMAIN_ALWAYS_ON,
 			PSC_MDCTL_NEXT_ENABLE); 						// initialization of GPIO support in PSC module
@@ -415,6 +471,7 @@ void main(void)
 	GPIODirModeSet(SOC_GPIO_0_REGS, 2, GPIO_DIR_INPUT);		// Sets the pin 1( GP0[1] )
 	GPIODirModeSet(SOC_GPIO_0_REGS, 3, GPIO_DIR_INPUT);		// Sets the pin 2( GP0[2] )
 	GPIODirModeSet(SOC_GPIO_0_REGS, 4, GPIO_DIR_INPUT);		// Sets the pin 3( GP0[3] )
+	*/
 	// ------------------------------------------------------------------------
 
 	// init device settings ---------------------------------------------------
@@ -508,7 +565,6 @@ void main(void)
 	bank[9] = ptr_w;
 
 	data_heap = (float**) calloc(DATA_HEAP_COUNT, sizeof(float*));
-	int i;
 	for (i = 0; i < DATA_HEAP_COUNT; i++)
 	{
 		float *heap_arr = (float*) calloc(DATA_MAX_LEN, sizeof(float));
@@ -814,9 +870,9 @@ void main(void)
 			{
 				//P15_SET();
 				upp_resetted = upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
-				if (upp_resetted == false)
+				if (upp_resetted == FALSE)
 				{
-					upp_resetted = true;
+					upp_resetted = TRUE;
 				}
 
 				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала дл€ приема новых данных яћ–
@@ -908,9 +964,9 @@ void main(void)
 				disableCache();
 
 //#3			upp_resetted = upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
-				if (upp_resetted == false)
+				if (upp_resetted == FALSE)
 				{
-					upp_resetted = true;
+					upp_resetted = TRUE;
 				}
 
 				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала дл€ приема новых данных яћ–
@@ -3531,14 +3587,14 @@ void executeProcPack(Data_Proc *proc, int index)
 int check_stb()
 {
 	static volatile uint32_t pin, pin_prev;
-	static volatile int first_run = true;
+	static volatile int first_run = TRUE;
 	volatile uint32_t i;
 	volatile int ret_code;
 
-	if (first_run == true)
+	if (first_run == TRUE)
 	{
 		pins_reg_prev = GPIO_B0_RD();
-		first_run = false;
+		first_run = FALSE;
 	}
 	pins_reg = GPIO_B0_RD();
 

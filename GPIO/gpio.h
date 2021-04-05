@@ -1,154 +1,73 @@
-/**
- * \file     gpio.h
- *
- * \brief    This file contains the function prototypes for the device
- *           abstraction layer for GPIO and some related macros.
- */
+#ifndef GPIO_H_
+#define GPIO_H_
+
+
+#include "../Common/OMAPL138_global.h"
+#include "hw_types.h"
+
+
+#define GP_0							(0)
+#define GP_1							(1)
+#define GP_2							(2)
+#define GP_3							(3)
+#define GP_4							(4)
+#define GP_5							(5)
+#define GP_6							(6)
+#define GP_7							(7)
+#define GP_8							(8)
+#define GP_9							(9)
+#define GP_10							(10)
+#define GP_11							(11)
+#define GP_12							(12)
+#define GP_13							(13)
+#define GP_14							(14)
+#define GP_15							(15)
+
+
+
+#define CSL_GPIO_DIR_DIR_OUT            (0x00000000u)
+#define CSL_GPIO_DIR_DIR_IN             (0x00000001u)
+
+
+#define CSL_GPIO_STATE_LOW				(0)
+#define CSL_GPIO_STATE_HIGH				(1)
+
+
+#define GPIO_FAL_ONLY					(0)
+#define GPIO_RIS_ONLY					(1)
+#define GPIO_FAL_AND_RIS				(3)
+
+
+#define GPIO_UNKNOWN_STATE				(0)
+#define GPIO_HIGH_STATE					(1)
+#define GPIO_FALL_STATE					(2)
+#define GPIO_LOW_STATE					(3)
+#define GPIO_RISE_STATE					(4)
+
+#define GPIO_IN_DATA(n)					(0x20 + (0x28 * n))
+
 
 /*
-* Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com/
+static volatile unsigned char new_GP0p1 = 1;
+static volatile unsigned char old_GP0p1 = 1;
+static volatile unsigned int new_GP0p2 = 1;
+static volatile unsigned int old_GP0p2 = 1;
+static volatile unsigned int new_GP0p3 = 1;
+static volatile unsigned int old_GP0p3 = 1;
 */
-/*
-*  Redistribution and use in source and binary forms, with or without
-*  modification, are permitted provided that the following conditions
-*  are met:
-*
-*    Redistributions of source code must retain the above copyright
-*    notice, this list of conditions and the following disclaimer.
-*
-*    Redistributions in binary form must reproduce the above copyright
-*    notice, this list of conditions and the following disclaimer in the
-*    documentation and/or other materials provided with the
-*    distribution.
-*
-*    Neither the name of Texas Instruments Incorporated nor the names of
-*    its contributors may be used to endorse or promote products derived
-*    from this software without specific prior written permission.
-*
-*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-*  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-*  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-*  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-*  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-*  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-*  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-*  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-*  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*
-*/
- 
-#ifndef      __GPIO_H__
-#define      __GPIO_H__
-
-#include "hw_gpio.h"
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/************* GPIO pin directions.************************************/
-
-/* This is used to configure a GPIO pin as an input pin. */
-#define GPIO_DIR_INPUT                1
-/* This is used to configure a GPIO pin as an output pin.*/
-#define GPIO_DIR_OUTPUT               0
-
-/******************Interrupt Trigger Level Types.**********************/
-
-/* Disable interrupt generation on both the edges of a signal on a pin.*/
-#define GPIO_INT_TYPE_NOEDGE          0
-
-/* Enable interrupt generation on falling edge of a signal on a pin.*/
-#define GPIO_INT_TYPE_FALLEDGE        1
-
-/* Enable interrupt generation on the rising edge of a signal on a pin.*/
-#define GPIO_INT_TYPE_RISEDGE         2
-
-/* Enable interrupt generation on both the edges of a signal on a pin.*/
-#define GPIO_INT_TYPE_BOTHEDGE        3
-
-/*****************Interrupt Pending status.*****************************/
-
-/* This signifies interrupt status as cleared.*/
-#define GPIO_INT_NOPEND               0
-
-/* This signifies interrupt status as pending.*/
-#define GPIO_INT_PEND                 1
-
-/*****************Write values to a pin.********************************/
-
-/* This is used to write a logic 0 to a pin.*/
-#define GPIO_PIN_LOW                  0
-
-/* This is used to write a logic 1 to a pin.*/
-#define GPIO_PIN_HIGH                 1
 
 
-/*****************Bit Mask values for banks.***************************/
-/* 
-** The following macros are used by the application while invoking
-** the function 'GPIOBankPinsWrite'. Any one or a combination of 
-** the below macros is passed as 'setPins' and 'clrPins' to 
-** 'GPIOBankPinsWrite'.
-*/
-#define GPIO_BANK_PIN_0              GPIO_DIR_DIR0
-#define GPIO_BANK_PIN_1              GPIO_DIR_DIR1
-#define GPIO_BANK_PIN_2              GPIO_DIR_DIR2
-#define GPIO_BANK_PIN_3              GPIO_DIR_DIR3
-#define GPIO_BANK_PIN_4              GPIO_DIR_DIR4
-#define GPIO_BANK_PIN_5              GPIO_DIR_DIR5
-#define GPIO_BANK_PIN_6              GPIO_DIR_DIR6
-#define GPIO_BANK_PIN_7              GPIO_DIR_DIR7
-#define GPIO_BANK_PIN_8              GPIO_DIR_DIR8
-#define GPIO_BANK_PIN_9              GPIO_DIR_DIR9
-#define GPIO_BANK_PIN_10             GPIO_DIR_DIR10
-#define GPIO_BANK_PIN_11             GPIO_DIR_DIR11
-#define GPIO_BANK_PIN_12             GPIO_DIR_DIR12
-#define GPIO_BANK_PIN_13             GPIO_DIR_DIR13
-#define GPIO_BANK_PIN_14             GPIO_DIR_DIR14
-#define GPIO_BANK_PIN_15             GPIO_DIR_DIR15
+void gpioPowerOn(CSL_PscRegsOvly psc1Regs);
+void enableGPIOPinMux_Bank0(int *pins, int count, CSL_SyscfgRegsOvly sysRegs);
+void configureGPIOPins_Bank0(int *pins, int *pin_dirs, int count, CSL_GpioRegsOvly gpioRegs);
+void writeGPIOPin_Bank0(int pin, unsigned int state, CSL_GpioRegsOvly gpioRegs);
+unsigned int readGPIOPin_Bank0(int pin, CSL_GpioRegsOvly gpioRegs);
+unsigned int readGPIO_Bank0(CSL_GpioRegsOvly gpioRegs);
+void configureGPIOInterrupts_Bank0(int *pins, int *int_states, int count, CSL_GpioRegsOvly gpioRegs);
+void mapGPIOInterrupt_Bank0(int intc, CSL_DspintcRegsOvly intcRegs);
 
-
-
-/*****************************************************************************
-**                   FUNCTION DECLARATIONS                                   
-*****************************************************************************/
-
-
-void GPIODirModeSet(unsigned int baseAdd, unsigned int pinNumber,
-                    unsigned int pinDir);
-unsigned int GPIODirModeGet(unsigned int baseAdd, unsigned int pinNumber);
-void GPIOPinWrite(unsigned int baseAdd, unsigned int pinNumber,
-                  unsigned int bitValue);
 int GPIOPinRead(unsigned int baseAdd, unsigned int pinNumber);
-void GPIOIntTypeSet(unsigned int baseAdd, unsigned int pinNumber,
-                    unsigned int intType);
-unsigned int GPIOIntTypeGet(unsigned int baseAdd, unsigned int pinNumber);
-unsigned int GPIOPinIntStatus(unsigned int baseAdd, unsigned int pinNumber);
-void GPIOPinIntClear(unsigned int baseAdd, unsigned int pinNumber);
-void GPIOBankIntEnable(unsigned int baseAdd, unsigned int bankNumber);
-void GPIOBankIntDisable(unsigned int baseAdd, unsigned int bankNumber);
-void GPIOBankPinsWrite(unsigned int baseAdd, unsigned int bankNumber, unsigned int setPins, unsigned int clrPins);
 unsigned int GPIOBankRead(unsigned int baseAdd, unsigned int bankNumber);
 
-#ifdef __cplusplus
-}
-#endif
-#endif
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#endif // GPIO_H_

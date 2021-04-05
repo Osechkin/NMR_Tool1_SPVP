@@ -1,211 +1,553 @@
-/**
- *  \file     gpio.c
- * 
- *  \brief    This file contains the device abstraction layer APIs for GPIO
+/*
+ * gpio.c
+ *
+ *  Created on: 19.10.2016
+ *      Author: Osechkin
  */
 
-/*
-* Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com/
-*/
-/*
-*  Redistribution and use in source and binary forms, with or without
-*  modification, are permitted provided that the following conditions
-*  are met:
-*
-*    Redistributions of source code must retain the above copyright
-*    notice, this list of conditions and the following disclaimer.
-*
-*    Redistributions in binary form must reproduce the above copyright
-*    notice, this list of conditions and the following disclaimer in the
-*    documentation and/or other materials provided with the
-*    distribution.
-*
-*    Neither the name of Texas Instruments Incorporated nor the names of
-*    its contributors may be used to endorse or promote products derived
-*    from this software without specific prior written permission.
-*
-*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-*  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-*  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-*  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-*  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-*  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-*  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-*  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-*  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*
-*/
+#include <cstdio>
 
-
-/* Driver APIs */
 #include "gpio.h"
-#include "hw_types.h"
 
 
-/***********************************************************************/
-/*              API FUNCTION DEFINITIONS.                              */ 
-/***********************************************************************/
 
-/**
- * \brief    This function configures the direction of a pin as input or 
- *           output.
- *
- * \param    baseAdd     The memory address of the GPIO instance being used.
- * \param    pinNumber   The serial number of the GPIO pin.
- *                       The 144 GPIO pins have serial numbers from 1 to 144.
- *                       
- * \param    pinDir      The direction to be set for the pin.
- *                       This can take the values:
- *                       1> GPIO_DIR_INPUT, for configuring the pin as input.
- *                       2> GPIO_DIR_OUTPUT, for configuring the pin as output.
- * 
- * \return   None.
- *
- * \note     Here we write to the DIRn register. Writing a logic 1 configures 
- *           the pin as input and writing logic 0 as output. By default, all
- *           the pins are set as input pins.
- */
-void GPIODirModeSet(unsigned int baseAdd, unsigned int pinNumber, 
-                    unsigned int pinDir)
-
+void enableGPIOPinMux_Bank0(int *pins, int count, CSL_SyscfgRegsOvly sysRegs)
 {
-    unsigned int regNumber = 0;
-    unsigned int pinOffset = 0;
+	/* Key to be written to enable the pin mux registers for write            */
+	sysRegs->KICK0R = 0x83e70b13;
+	sysRegs->KICK1R = 0x95A4F1E0;
 
-    /*
-    ** Each register contains settings for each pin of two banks. The 32 bits
-    ** represent 16 pins each from the banks. Thus the register number must be
-    ** calculated based on 32 pins boundary.
-    */
-    regNumber = (pinNumber - 1)/32;
- 
-    /*
-    ** In every register the least significant bits starts with a GPIO number on
-    ** a boundary of 32. Thus the pin offset must be calculated based on 32
-    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in 
-    ** 'register_name01'.
-    */
-    pinOffset = (pinNumber - 1) % 32;
+	int i;
+	for (i = 0; i < count; i++)
+	{
+	 	int pin_number = pins[i];
+	   	switch (pin_number)
+	   	{
+	   	case GP_0:		sysRegs->PINMUX1 = ((CSL_SYSCFG_PINMUX1_PINMUX1_31_28_GPIO0_0) << (CSL_SYSCFG_PINMUX1_PINMUX1_31_28_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 0
+	   	case GP_1:		sysRegs->PINMUX1 = ((CSL_SYSCFG_PINMUX1_PINMUX1_27_24_GPIO0_1) << (CSL_SYSCFG_PINMUX1_PINMUX1_27_24_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 1
+	   	case GP_2:		sysRegs->PINMUX1 = ((CSL_SYSCFG_PINMUX1_PINMUX1_23_20_GPIO0_2) << (CSL_SYSCFG_PINMUX1_PINMUX1_23_20_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 2
+	   	case GP_3:		sysRegs->PINMUX1 = ((CSL_SYSCFG_PINMUX1_PINMUX1_19_16_GPIO0_3) << (CSL_SYSCFG_PINMUX1_PINMUX1_19_16_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 3
+	   	case GP_4:		sysRegs->PINMUX1 = ((CSL_SYSCFG_PINMUX1_PINMUX1_15_12_GPIO0_4) << (CSL_SYSCFG_PINMUX1_PINMUX1_15_12_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 4
+	   	case GP_5:		sysRegs->PINMUX1 = ((CSL_SYSCFG_PINMUX1_PINMUX1_11_8_GPIO0_5) << (CSL_SYSCFG_PINMUX1_PINMUX1_11_8_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 5
+	   	case GP_6:		sysRegs->PINMUX1 = ((CSL_SYSCFG_PINMUX1_PINMUX1_7_4_GPIO0_6) << (CSL_SYSCFG_PINMUX1_PINMUX1_7_4_SHIFT)); break;		// enable the pinmux for the GPIO bank 0 pin 6
+	   	case GP_7:		sysRegs->PINMUX1 = ((CSL_SYSCFG_PINMUX1_PINMUX1_3_0_GPIO0_7) << (CSL_SYSCFG_PINMUX1_PINMUX1_3_0_SHIFT)); break;		// enable the pinmux for the GPIO bank 0 pin 7
+	   	case GP_8:		sysRegs->PINMUX0 = ((CSL_SYSCFG_PINMUX0_PINMUX0_31_28_GPIO0_8) << (CSL_SYSCFG_PINMUX0_PINMUX0_31_28_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 8
+	   	case GP_9:		sysRegs->PINMUX0 = ((CSL_SYSCFG_PINMUX0_PINMUX0_27_24_GPIO0_9) << (CSL_SYSCFG_PINMUX0_PINMUX0_27_24_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 9
+	   	case GP_10:		sysRegs->PINMUX0 = ((CSL_SYSCFG_PINMUX0_PINMUX0_23_20_GPIO0_10) << (CSL_SYSCFG_PINMUX0_PINMUX0_23_20_SHIFT)); break;// enable the pinmux for the GPIO bank 0 pin 10
+	   	case GP_11:		sysRegs->PINMUX0 = ((CSL_SYSCFG_PINMUX0_PINMUX0_19_16_GPIO0_11) << (CSL_SYSCFG_PINMUX0_PINMUX0_19_16_SHIFT)); break;// enable the pinmux for the GPIO bank 0 pin 11
+	   	case GP_12:		sysRegs->PINMUX0 = ((CSL_SYSCFG_PINMUX0_PINMUX0_15_12_GPIO0_12) << (CSL_SYSCFG_PINMUX0_PINMUX0_15_12_SHIFT)); break;// enable the pinmux for the GPIO bank 0 pin 12
+	   	case GP_13:		sysRegs->PINMUX0 = ((CSL_SYSCFG_PINMUX0_PINMUX0_11_8_GPIO0_13) << (CSL_SYSCFG_PINMUX0_PINMUX0_11_8_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 13
+	   	case GP_14:		sysRegs->PINMUX0 = ((CSL_SYSCFG_PINMUX0_PINMUX0_7_4_GPIO0_14) << (CSL_SYSCFG_PINMUX0_PINMUX0_7_4_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 14
+	   	case GP_15:		sysRegs->PINMUX0 = ((CSL_SYSCFG_PINMUX0_PINMUX0_3_0_GPIO0_15) << (CSL_SYSCFG_PINMUX0_PINMUX0_3_0_SHIFT)); break;	// enable the pinmux for the GPIO bank 0 pin 15
+	   	default: break;
+	   	}
+	   }
 
-    if(GPIO_DIR_OUTPUT == pinDir)
+	/* lock the pinmux registers                                              */
+	sysRegs->KICK0R = 0x00000000;
+	sysRegs->KICK1R = 0x00000000;
+
+	printf("GPIO enabled in the pin mux registers for Bank0\n");
+}
+
+
+void configureGPIOPins_Bank0(int *pins, int *pin_dirs, int count, CSL_GpioRegsOvly gpioRegs)
+{
+	int i;
+	for (i = 0; i < count; i++)
+	{
+		//if (pin_dirs[i] == 0) pin_dirs[i] = CSL_GPIO_DIR_DIR_OUT;
+		//else pin_dirs[i] = CSL_GPIO_DIR_DIR_IN;
+
+		switch (pins[i])
+		{
+		case GP_0:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR0, pin_dirs[i]);	break;
+		case GP_1:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR1, pin_dirs[i]);	break;
+		case GP_2:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR2, pin_dirs[i]);	break;
+		case GP_3:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR3, pin_dirs[i]);	break;
+		case GP_4:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR4, pin_dirs[i]);	break;
+		case GP_5:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR5, pin_dirs[i]);	break;
+		case GP_6:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR6, pin_dirs[i]);	break;
+		case GP_7:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR7, pin_dirs[i]);	break;
+		case GP_8:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR8, pin_dirs[i]);	break;
+		case GP_9:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR9, pin_dirs[i]);	break;
+		case GP_10:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR10, pin_dirs[i]);	break;
+		case GP_11:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR11, pin_dirs[i]);	break;
+		case GP_12:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR12, pin_dirs[i]);	break;
+		case GP_13:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR13, pin_dirs[i]);	break;
+		case GP_14:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR14, pin_dirs[i]);	break;
+		case GP_15:		CSL_FINS(gpioRegs->BANK[0].DIR,	GPIO_DIR_DIR15, pin_dirs[i]);	break;
+		default: break;
+		}
+	}
+
+	printf("GPIO pins in Bank0 were configured for input/output\n");
+}
+
+
+void writeGPIOPin_Bank0(int pin, unsigned int state, CSL_GpioRegsOvly gpioRegs)
+{
+	if (state == 0) state = CSL_GPIO_STATE_LOW;
+	else state = CSL_GPIO_STATE_HIGH;
+
+	switch (pin)
+	{
+	case 0:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT0, state);	break;
+	case 1:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT1, state);	break;
+	case 2:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT2, state);	break;
+	case 3:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT3, state);	break;
+	case 4:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT4, state);	break;
+	case 5:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT5, state);	break;
+	case 6:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT6, state);	break;
+	case 7:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT7, state);	break;
+	case 8:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT8, state);	break;
+	case 9:		CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT9, state);	break;
+	case 10:	CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT10, state);	break;
+	case 11:	CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT11, state);	break;
+	case 12:	CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT12, state);	break;
+	case 13:	CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT13, state);	break;
+	case 14:	CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT14, state);	break;
+	case 15:	CSL_FINS(gpioRegs->BANK[0].OUT_DATA, GPIO_OUT_DATA_OUT15, state);	break;
+	default: break;
+	}
+}
+
+
+unsigned int readGPIOPin_Bank0(int pin, CSL_GpioRegsOvly gpioRegs)
+{
+	unsigned int state = 0;
+
+	switch (pin)
+	{
+	case 0:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN0);	break;
+	case 1:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN1);	break;
+	case 2:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN2);	break;
+	case 3:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN3);	break;
+	case 4:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN4);	break;
+	case 5:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN5);	break;
+	case 6:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN6);	break;
+	case 7:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN7);	break;
+	case 8:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN8);	break;
+	case 9:		state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN9);	break;
+	case 10:	state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN10);	break;
+	case 11:	state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN11);	break;
+	case 12:	state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN12);	break;
+	case 13:	state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN13);	break;
+	case 14:	state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN14);	break;
+	case 15:	state = CSL_FEXT(gpioRegs->BANK[0].IN_DATA, GPIO_IN_DATA_IN15);	break;
+	default: break;
+	}
+
+	return state;
+}
+
+
+unsigned int readGPIO_Bank0(CSL_GpioRegsOvly gpioRegs)
+{
+	unsigned int pin = 0;
+	pin = gpioRegs->BANK[0].IN_DATA;
+	return pin;
+}
+
+
+/*
+ * \brief    Function to power on the GPIO module in the power sleep controller.
+ * \param    None
+ * \return   None
+ *  Note: This function causes the program to abort in case it is unable to enable the GPIO module.
+ */
+void gpioPowerOn(CSL_PscRegsOvly psc1Regs)
+{
+    volatile Uint32 pscTimeoutCount = 10240u;
+    Uint32          temp            = 0;
+
+    /* we will now power on the GPIO module in the PSC.                       *
+     * Configure the GPIO Module to Enable state                              */
+    psc1Regs->MDCTL[CSL_PSC_GPIO] = ((psc1Regs->MDCTL[CSL_PSC_GPIO] & 0xFFFFFFE0) | CSL_PSC_MDSTAT_STATE_ENABLE);
+
+    /* Kick start the Enable Command                                          */
+    temp = psc1Regs->PTCMD;
+    temp = ((temp & CSL_PSC_PTCMD_GO0_MASK) | (CSL_PSC_PTCMD_GO0_SET << CSL_PSC_PTCMD_GO0_SHIFT));
+
+    psc1Regs->PTCMD |= temp;
+
+    /* Wait for the power state transition to occur                           */
+    while (((psc1Regs->PTSTAT & (CSL_PSC_PTSTAT_GOSTAT0_IN_TRANSITION)) != 0) && (pscTimeoutCount>0))
     {
-        HWREG(baseAdd + GPIO_DIR(regNumber)) &= ~(1 << pinOffset);
+        pscTimeoutCount--;
+    }
+
+    /* Check if PSC state transition timed out                                */
+    if (0 == pscTimeoutCount)
+    {
+        printf("GPIO PSC transition to ON state timed out\n");
     }
     else
     {
-        HWREG(baseAdd + GPIO_DIR(regNumber)) |= (1 << pinOffset);
+        printf("GPIO enabled in PSC\n");
     }
 }
 
-/**
- * \brief  This function gets the direction of a pin which has been configured
- *         as an input or an output pin.
- * 
- * \param   baseAdd    The memory address of the GPIO instance being used.
- * \param   pinNumber  The serial number of the GPIO pin.
- *                     The 144 GPIO pins have serial numbers from 1 to 144.                      
- *
- * \return  This returns one of the following two values:
- *          1> GPIO_DIR_INPUT, if the pin is configured as an input pin.
- *          2> GPIO_DIR_OUTPUT, if the pin is configured as an output pin.
- *
- */
-unsigned int GPIODirModeGet(unsigned int baseAdd, unsigned int pinNumber)
+
+void configureGPIOInterrupts_Bank0(int *pins, int *int_states, int count, CSL_GpioRegsOvly gpioRegs)
 {
-    unsigned int dir = GPIO_DIR_INPUT;
-    unsigned int regNumber = 0;
-    unsigned int pinOffset = 0;
-    
-    /*
-    ** Each register contains settings for each pin of two banks. The 32 bits
-    ** represent 16 pins each from the banks. Thus the register number must be
-    ** calculated based on 32 pins boundary.
-    */
- 
-    regNumber = (pinNumber - 1)/32;
-    
-    /*
-    ** In every register the least significant bits starts with a GPIO number on
-    ** a boundary of 32. Thus the pin offset must be calculated based on 32
-    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in 
-    ** 'register_name01'.
-    */
- 
-    pinOffset = (pinNumber - 1) % 32;
+	/* Enable GPIO Bank interrupt for bank 0                                  */
+	CSL_FINST(gpioRegs->BINTEN, GPIO_BINTEN_EN0, ENABLE);
 
-    dir = (HWREG(baseAdd + GPIO_DIR(regNumber)) & (1 << pinOffset));
+	int i;
+	for (i = 0; i < count; i++)
+	{
+		switch (pins[i])
+		{
+		case 0:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL0, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS0, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS0, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL0, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL0, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS0, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 1:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL1, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS1, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS1, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL1, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL1, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS1, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 2:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL2, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS2, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS2, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL2, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL2, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS2, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 3:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL3, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS3, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS3, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL3, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL3, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS3, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 4:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL4, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS4, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS4, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL4, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL4, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS4, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 5:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL5, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS5, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS5, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL5, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL5, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS5, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 6:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL6, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS6, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS6, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL6, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL6, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS6, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 7:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL7, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS7, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS7, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL7, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL7, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS7, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 8:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL8, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS8, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS8, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL8, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL8, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS8, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 9:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL9, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS9, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS9, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL9, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL9, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS9, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 10:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL10, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS10, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS10, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL10, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL10, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS10, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 11:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL11, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS11, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS11, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL11, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL11, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS11, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 12:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL12, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS12, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS12, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL12, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL12, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS12, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 13:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL13, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS13, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS13, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL13, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL13, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS13, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 14:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL14, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS14, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS14, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL14, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL14, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS14, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		case 15:
+		{
+			if (int_states[i] == GPIO_FAL_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL15, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_RIS_TRIG, GPIO_CLR_RIS_TRIG_CLRRIS15, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			else if (int_states[i] == GPIO_RIS_ONLY)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS15, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].CLR_FAL_TRIG, GPIO_CLR_FAL_TRIG_CLRFAL15, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+			}
+			else if (int_states[i] == GPIO_FAL_AND_RIS)
+			{
+				CSL_FINS(gpioRegs->BANK[0].SET_FAL_TRIG, GPIO_SET_FAL_TRIG_SETFAL15, CSL_GPIO_SET_FAL_TRIG_SETFAL_ENABLE);
+				CSL_FINS(gpioRegs->BANK[0].SET_RIS_TRIG, GPIO_SET_RIS_TRIG_SETRIS15, CSL_GPIO_SET_RIS_TRIG_SETRIS_ENABLE);
+			}
+			break;
+		}
+		default: break;
+		}
+	}
 
-    return (dir >> pinOffset);
+	printf("Enable GPIO interrupt (Bank0) for rising/falling/both\n");
 }
 
 
-/**
- * \brief   This function writes a logic 1 or a logic 0 to the specified pin.
- *
- * \param   baseAdd    The memory address of the GPIO instance being used.
- * \param   pinNumber  The serial number of the GPIO pin.
- *                     The 144 GPIO pins have serial numbers from 1 to 144. 
- *
- * \param   bitValue   This signifies whether to write a logic 0 or logic 1 
- *                     to the specified pin.This variable can take any of the 
- *                     following two values:
- *                     1> GPIO_PIN_LOW, which indicates to clear(logic 0) the bit.
- *                     2> GPIO_PIN_HIGH, which indicates to set(logic 1) the bit.
- *
- * \return  None.
- *
- * \note    The pre-requisite to write to any pin is that the pin has to
- *          be configured as an output pin.
- */
-void GPIOPinWrite(unsigned int baseAdd, unsigned int pinNumber, 
-                  unsigned int bitValue)
+void mapGPIOInterrupt_Bank0(int intc, CSL_DspintcRegsOvly intcRegs)
 {
-    unsigned int regNumber = 0;
-    unsigned int pinOffset = 0;
-    
-    /*
-    ** Each register contains settings for each pin of two banks. The 32 bits
-    ** represent 16 pins each from the banks. Thus the register number must be
-    ** calculated based on 32 pins boundary.
-    */
- 
-    regNumber = (pinNumber - 1)/32;
+	switch (intc)
+	{
+	case 4:		CSL_FINS(intcRegs->INTMUX1, DSPINTC_INTMUX1_INTSEL4, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int4
+	case 5:		CSL_FINS(intcRegs->INTMUX1, DSPINTC_INTMUX1_INTSEL5, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int5
+	case 6:		CSL_FINS(intcRegs->INTMUX1, DSPINTC_INTMUX1_INTSEL6, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int6
+	case 7:		CSL_FINS(intcRegs->INTMUX1, DSPINTC_INTMUX1_INTSEL7, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int7
+	case 8:		CSL_FINS(intcRegs->INTMUX2, DSPINTC_INTMUX2_INTSEL8, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int8
+	case 9:		CSL_FINS(intcRegs->INTMUX2, DSPINTC_INTMUX2_INTSEL9, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int9
+	case 10:	CSL_FINS(intcRegs->INTMUX2, DSPINTC_INTMUX2_INTSEL10, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int10
+	case 11:	CSL_FINS(intcRegs->INTMUX2, DSPINTC_INTMUX2_INTSEL11, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int11
+	case 12:	CSL_FINS(intcRegs->INTMUX3, DSPINTC_INTMUX3_INTSEL12, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int12
+	case 13:	CSL_FINS(intcRegs->INTMUX3, DSPINTC_INTMUX3_INTSEL13, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int13
+	case 14:	CSL_FINS(intcRegs->INTMUX3, DSPINTC_INTMUX3_INTSEL14, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int14
+	case 15:	CSL_FINS(intcRegs->INTMUX3, DSPINTC_INTMUX3_INTSEL15, CSL_INTC_EVENTID_GPIO_BNK0_INT);	break;	// map GPIO0 event to cpu int15
+	default: break;
+	}
 
-    /*
-    ** In every register the least significant bits starts with a GPIO number on
-    ** a boundary of 32. Thus the pin offset must be calculated based on 32
-    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in 
-    ** 'register_name01'.
-    */
-   
-    pinOffset = (pinNumber - 1) % 32;
-
-    if(GPIO_PIN_LOW == bitValue)
-    {
-        HWREG(baseAdd + GPIO_CLR_DATA(regNumber)) = (1 << pinOffset);
-    }
-    else if(GPIO_PIN_HIGH == bitValue)
-    {
-        HWREG(baseAdd + GPIO_SET_DATA(regNumber)) = (1 << pinOffset);
-    }
+	printf("GPIO0 events (Bank0) were mapped to CPU interrupts\n");
 }
+
 
 /**
  * \brief    This function reads the value(logic level) of an input or an
  *           output pin.
- * 
+ *
  * \param    baseAdd     The memory address of the GPIO instance being used.
  * \param    pinNumber   The serial number of the GPIO pin.
- *                       The 144 GPIO pins have serial numbers from 1 to 144. 
+ *                       The 144 GPIO pins have serial numbers from 1 to 144.
  *
  * \return   This returns the value present on the specified pin. This returns
  *           one of the following values:
  *           1> GPIO_PIN_LOW, if the value on the pin is logic 0.
  *           2> GPIO_PIN_HIGH, if the value on the pin is logic 1.
  *
- * \note     Using this function, we can read the values of both input and 
+ * \note     Using this function, we can read the values of both input and
  *           output pins.
  */
 int GPIOPinRead(unsigned int baseAdd, unsigned int pinNumber)
@@ -221,14 +563,14 @@ int GPIOPinRead(unsigned int baseAdd, unsigned int pinNumber)
     */
 
     regNumber = (pinNumber - 1)/32;
-   
+
     /*
     ** In every register the least significant bits starts with a GPIO number on
     ** a boundary of 32. Thus the pin offset must be calculated based on 32
-    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in 
+    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in
     ** 'register_name01'.
     */
-    
+
     pinOffset = (pinNumber - 1) % 32;
 
     val = HWREG(baseAdd + GPIO_IN_DATA(regNumber)) & (1 << pinOffset);
@@ -236,310 +578,6 @@ int GPIOPinRead(unsigned int baseAdd, unsigned int pinNumber)
     return (val >> pinOffset);
 }
 
-/**
- * \brief   This function configures the trigger level type for which an 
- *          interrupt is required to occur.
- * 
- * \param   baseAdd    The memory address of the GPIO instance being used.
- *
- * \param   pinNumber  The serial number of the GPIO pin.
- *                     The 144 GPIO pins have serial numbers from 1 to 144. 
- *
- * \param   intType    This specifies the trigger level type. This can take 
- *                     one of the following four values:
- *                     1> GPIO_INT_TYPE_NOEDGE, to not generate any interrupts.
- *                     2> GPIO_INT_TYPE_FALLEDGE, to generate an interrupt on 
- *                        the falling edge of a signal on that pin. 
- *                     3> GPIO_INT_TYPE_RISEDGE, to generate an interrupt on the 
- *                        rising edge of a signal on that pin.
- *                     4> GPIO_INT_TYPE_BOTHEDGE, to generate interrupts on both
- *                        rising and falling edges of a signal on that pin.
- *
- * \return   None.
- *
- * \note     Configuring the trigger level type for generating interrupts is not 
- *           enough for the GPIO module to generate interrupts. The user should 
- *           also enable the interrupt generation capability for the bank to which
- *           the pin belongs to. Use the function GPIOBankIntEnable() to do the same.             
- */
- 
-
-void GPIOIntTypeSet(unsigned int baseAdd, unsigned int pinNumber, 
-                    unsigned int intType)
-{
-    unsigned int regNumber = 0;
-    unsigned int pinOffset = 0;
-
-    /*
-    ** Each register contains settings for each pin of two banks. The 32 bits
-    ** represent 16 pins each from the banks. Thus the register number must be
-    ** calculated based on 32 pins boundary.
-    */
-
-    regNumber = (pinNumber - 1)/32;
-    
-    /*
-    ** In every register the least significant bits starts with a GPIO number on
-    ** a boundary of 32. Thus the pin offset must be calculated based on 32
-    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in
-    ** 'register_name01'.
-    */
-    
-    pinOffset = (pinNumber - 1) % 32;
-
-    switch (intType)
-    {
-        case GPIO_INT_TYPE_RISEDGE:
-            /* Setting Rising edge and clearing Falling edge trigger levels.*/
-            HWREG(baseAdd + GPIO_SET_RIS_TRIG(regNumber)) = (1 << pinOffset);
-            HWREG(baseAdd + GPIO_CLR_FAL_TRIG(regNumber)) = (1 << pinOffset);
-            break;
-
-        case GPIO_INT_TYPE_FALLEDGE:
-            /* Setting Falling edge and clearing Rising edge trigger levels.*/ 
-            HWREG(baseAdd + GPIO_SET_FAL_TRIG(regNumber)) = (1 << pinOffset);
-            HWREG(baseAdd + GPIO_CLR_RIS_TRIG(regNumber)) = (1 << pinOffset);
-            break;
-
-        case GPIO_INT_TYPE_BOTHEDGE:
-            /* Setting both Rising and Falling edge trigger levels.*/
-            HWREG(baseAdd + GPIO_SET_RIS_TRIG(regNumber)) = (1 << pinOffset);
-            HWREG(baseAdd + GPIO_SET_FAL_TRIG(regNumber)) = (1 << pinOffset);
-            break;
-
-        case GPIO_INT_TYPE_NOEDGE:
-            /* Clearing both Rising and Falling edge trigger levels. */
-            HWREG(baseAdd + GPIO_CLR_RIS_TRIG(regNumber)) = (1 << pinOffset);
-            HWREG(baseAdd + GPIO_CLR_FAL_TRIG(regNumber)) = (1 << pinOffset);
-            break;
-
-        default:
-            break;
-    }
-}
-
-/**
- * \brief   This function reads the trigger level type being set for interrupts
- *          to be generated.
- * 
- * \param   baseAdd    The memory address of the GPIO instance being used.
- *
- * \param   pinNumber  The serial number of the GPIO pin to be accessed.
- *                     The 144 GPIO pins have serial numbers from 1 to 144. 
- *
- * \return  This returns a value which indicates the type of trigger level 
- *          type being set. One of the following values is returned.
- *          1> GPIO_INT_TYPE_NOEDGE, indicating no interrupts will be 
- *             generated over the corresponding pin.
- *          2> GPIO_INT_TYPE_FALLEDGE, indicating a falling edge on the 
- *             corresponding pin signifies an interrupt generation.
- *          3> GPIO_INT_TYPE_RISEDGE, indicating a rising edge on the 
- *             corresponding pin signifies an interrupt generation.
- *          4> GPIO_INT_TYPE_BOTHEDGE, indicating both edges on the
- *             corresponding pin signifies an interrupt each being generated.
- *
- */
-unsigned int GPIOIntTypeGet(unsigned int baseAdd, unsigned int pinNumber)
-{
-    unsigned int intType = GPIO_INT_TYPE_NOEDGE;
-    unsigned int regNumber = 0;
-    unsigned int pinOffset = 0;
-
-    /*
-    ** Each register contains settings for each pin of two banks. The 32 bits
-    ** represent 16 pins each from the banks. Thus the register number must be
-    ** calculated based on 32 pins boundary.
-    */
-    regNumber = (pinNumber - 1)/32;
-   
-    /*
-    ** In every register the least significant bits starts with a GPIO number on
-    ** a boundary of 32. Thus the pin offset must be calculated based on 32
-    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in
-    ** 'register_name01'.
-    */
-
-    pinOffset = (pinNumber - 1) % 32;
-
-    if ((HWREG(baseAdd + GPIO_SET_FAL_TRIG(regNumber))) & (1 << pinOffset))
-    {
-        intType = GPIO_INT_TYPE_FALLEDGE;
-    }
-
-    if ((HWREG(baseAdd + GPIO_SET_RIS_TRIG(regNumber))) & (1 << pinOffset))
-    {
-        intType |= GPIO_INT_TYPE_RISEDGE;
-    }
-  
-    return intType;    
-}
-
-/**
- * \brief    This function determines the status of interrupt on a specified
- *           pin.  
- * 
- * \param    baseAdd    The memory address of the GPIO instance being used.
-
- * \param    pinNumber  The serial number of the GPIO pin to be accessed.
- *                      The 144 GPIO pins have serial numbers from 1 to 144. 
-
- * \return   This returns a value which expresses the status of an interrupt
- *           raised over the specified pin.
- *           1> GPIO_INT_NOPEND, if no interrupts are left to be serviced.
- *           2> GPIO_INT_PEND, if the interrupt raised over that pin is yet
- *              to be cleared and serviced.
- *              
- * \note     If an interrupt over a pin is found to be pending, then the 
- *           application can call GPIOPinIntClear() to clear the interrupt
- *           status.  
- *           
- *
- */
-unsigned int GPIOPinIntStatus(unsigned int baseAdd, unsigned int pinNumber)
-{
-    unsigned int intStatus = GPIO_INT_NOPEND;
-    unsigned int regNumber = 0;
-    unsigned int pinOffset = 0;
-
-    /*
-    ** Each register contains settings for each pin of two banks. The 32 bits
-    ** represent 16 pins each from the banks. Thus the register number must be
-    ** calculated based on 32 pins boundary.
-    */
-    regNumber = (pinNumber - 1)/32;
-    
-    /*
-    ** In every register the least significant bits starts with a GPIO number on
-    ** a boundary of 32. Thus the pin offset must be calculated based on 32
-    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in
-    ** 'register_name01'.
-    */
-
-    pinOffset = (pinNumber - 1) % 32;
-
-    if(HWREG(baseAdd + GPIO_INTSTAT(regNumber)) & (1 << pinOffset))
-    {
-        intStatus = GPIO_INT_PEND;
-    }
-        
-    return intStatus;
-}
-
-/**
- * \brief     This function clears the interrupt status of the pin being 
- *            accessed.
- *
- * \param     baseAdd    The memory address of the GPIO instance being used.
- * \param     pinNumber  The serial number of the GPIO pin to be accessed.
- *                       The 144 GPIO pins have serial numbers from 1 to 144. 
- * \return    None.
- *
- */
-
-void GPIOPinIntClear(unsigned int baseAdd, unsigned int pinNumber)
-{
-    unsigned int regNumber = 0;
-    unsigned int pinOffset = 0;
-
-    /*
-    ** Each register contains settings for each pin of two banks. The 32 bits
-    ** represent 16 pins each from the banks. Thus the register number must be
-    ** calculated based on 32 pins boundary.
-    */
-    regNumber = (pinNumber - 1)/32;
-    
-    /*
-    ** In every register the least significant bits starts with a GPIO number on
-    ** a boundary of 32. Thus the pin offset must be calculated based on 32
-    ** pins boundary. Ex: 'pinNumber' of 1 corresponds to bit 0 in
-    ** 'register_name01'.
-    */
-
-    pinOffset = (pinNumber - 1) % 32;
-
-    HWREG(baseAdd + GPIO_INTSTAT(regNumber)) = (1 << pinOffset);
-}
-
-/**
- * \brief   This function enables the interrupt generation capability for the
- *          bank of GPIO pins specified.
- *
- * \param   baseAdd     The memory address of the GPIO instance being used.
- * \param   bankNumber  This is the bank for whose pins interrupt generation 
- *                      capabiility needs to be enabled.
- *                      bankNumber is 0 for bank 0, 1 for bank 1 and so on.
- * \return  None. 
- *
- */
-
-
-void GPIOBankIntEnable(unsigned int baseAdd, unsigned int bankNumber)
-{
-    HWREG(baseAdd + GPIO_BINTEN) |= (1 << bankNumber);
-} 
-
-/**
- * \brief   This function disables the interrupt generation capability for the
- *          bank of GPIO pins specified.
- *
- * \param   baseAdd     The memory address of the GPIO instance being used.
- * \param   bankNumber  This is the bank for whose pins interrupt generation
- *                      capability needs to be disabled.
- *                      bankNumber is 0 for bank 0, 1 for bank 1 and so on.
- * \return  None.
- *
- */
-
-
-void GPIOBankIntDisable(unsigned int baseAdd, unsigned int bankNumber)
-{
-    HWREG(baseAdd + GPIO_BINTEN) &= ~(1 << bankNumber);
-}
-
-
-
-/**
- * \brief   This function is used to collectively set and collectively clear
- *          the specified bits.
- *
- * \param   baseAdd     The memory address of the GPIO instance being used.
- * \param   bankNumber  Numerical value of the bank whose pins are to be 
- *                      modified.
- *
- * \param   setPins     The bit-mask of the pins whose values have to be set.
- *                      This could be the bitwise OR of the following macros:
- *                      -> GPIO_BANK_PIN_n where n >= 0 and n <= 15.
- *
- * \param   clrPins     The bit-mask of the pins whose values have to be 
- *                      cleared. This could be the bitwise OR of the following
- *                      macros:
- *                      -> GPIO_BANK_PIN_n where n >= 0 and n <= 15.
- *
- * \return  None.
- *
- * \note   The pre-requisite to write to any pins is that the pins have to be 
- *         configured as output pins.
- */
-
-void GPIOBankPinsWrite(unsigned int baseAdd, unsigned int bankNumber,
-                       unsigned int setPins, unsigned int clrPins)
-{
-    unsigned int regNumber;
-
-    regNumber = bankNumber/2;
-
-    if (1 == (bankNumber % 2))
-    {
-        HWREG(baseAdd + GPIO_SET_DATA(regNumber)) = ((setPins & 0xFFFF) << 16);
-        HWREG(baseAdd + GPIO_CLR_DATA(regNumber)) = ((clrPins & 0xFFFF) << 16);
-    }
-    else
-    {
-        HWREG(baseAdd + GPIO_SET_DATA(regNumber)) = (setPins & 0xFFFF);
-        HWREG(baseAdd + GPIO_CLR_DATA(regNumber)) = (clrPins & 0xFFFF);
-    }
-
-}
 
 /**
  * \brief    This function reads the value of an input or an
@@ -567,5 +605,3 @@ unsigned int GPIOBankRead(unsigned int baseAdd, unsigned int bankNumber)
 
 	return val;
 }
-
-/*****************************END OF FILE*************************************/ 
