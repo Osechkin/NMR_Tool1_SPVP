@@ -1,5 +1,5 @@
 -stack           0x00010000//0x00000800      /* Stack Size */
--heap            0x00800000//0x00000800      /* Heap Size */
+-heap            0x03000000//0x00000800      /* Heap Size */
 
 
 

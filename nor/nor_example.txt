@@ -1,0 +1,27 @@
+
+#include "nor/nor.h"
+
+#define DEBUG_SPI_FLASH
+
+#ifdef DEBUG_SPI_FLASH
+#define SPI_TEST_BUF_SIZE 256 //must be less than 256
+#define SPI_TEST_SIZE SPI_TEST_BUF_SIZE-0 //must be less than 256
+	nor_cfg();
+	char spi_flash_buf[SPI_TEST_BUF_SIZE];
+	memset (spi_flash_buf, 0x00, SPI_TEST_BUF_SIZE*sizeof(uint8_t));
+	nor_erase (0x780000);
+	{
+		nor_rd ( 0x780000, spi_flash_buf, SPI_TEST_BUF_SIZE );
+		spi_flash_test_buf_ff_fill(spi_flash_buf, SPI_TEST_BUF_SIZE);
+		nor_wr ( 0x780000, spi_flash_buf, SPI_TEST_SIZE );
+		memset (spi_flash_buf, 0x00, SPI_TEST_BUF_SIZE*sizeof(uint8_t));
+		nor_rd ( 0x780000, spi_flash_buf, SPI_TEST_BUF_SIZE );
+
+		nor_rd ( 0x780000, spi_flash_buf, SPI_TEST_BUF_SIZE );
+		spi_flash_test_buf_inc_fill(spi_flash_buf, SPI_TEST_BUF_SIZE);
+		nor_wr ( 0x780000, spi_flash_buf, SPI_TEST_SIZE );
+		memset (spi_flash_buf, 0x00, SPI_TEST_BUF_SIZE*sizeof(uint8_t));
+		nor_rd ( 0x780000, spi_flash_buf, SPI_TEST_BUF_SIZE );
+		dummyDelay(2000);
+	}
+#endif

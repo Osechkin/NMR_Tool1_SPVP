@@ -1,4 +1,4 @@
-#Sat Feb 13 16:42:59 MSK 2021
+#Wed Apr 07 22:00:22 MSD 2021
 eclipse.preferences.version=1
 encoding//Debug/Common/subdir_rules.mk=UTF-8
 encoding//Debug/Common/subdir_vars.mk=UTF-8
@@ -15,6 +15,8 @@ encoding//Debug/Timer/subdir_vars.mk=UTF-8
 encoding//Debug/UART/subdir_rules.mk=UTF-8
 encoding//Debug/UART/subdir_vars.mk=UTF-8
 encoding//Debug/makefile=UTF-8
+encoding//Debug/nor/subdir_rules.mk=UTF-8
+encoding//Debug/nor/subdir_vars.mk=UTF-8
 encoding//Debug/objects.mk=UTF-8
 encoding//Debug/proger/subdir_rules.mk=UTF-8
 encoding//Debug/proger/subdir_vars.mk=UTF-8
@@ -42,12 +44,12 @@ encoding//Release/Timer/subdir_vars.mk=UTF-8
 encoding//Release/UART/subdir_rules.mk=UTF-8
 encoding//Release/UART/subdir_vars.mk=UTF-8
 encoding//Release/makefile=UTF-8
+encoding//Release/nor/subdir_rules.mk=UTF-8
+encoding//Release/nor/subdir_vars.mk=UTF-8
 encoding//Release/objects.mk=UTF-8
 encoding//Release/proger/subdir_rules.mk=UTF-8
 encoding//Release/proger/subdir_vars.mk=UTF-8
 encoding//Release/sources.mk=UTF-8
-encoding//Release/spi/subdir_rules.mk=UTF-8
-encoding//Release/spi/subdir_vars.mk=UTF-8
 encoding//Release/subdir_rules.mk=UTF-8
 encoding//Release/subdir_vars.mk=UTF-8
 encoding//Release/uart_hduplex/subdir_rules.mk=UTF-8

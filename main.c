@@ -2,8 +2,6 @@
 // 13.02.2021
 //current version 0.2
 
-//#include <ti/pspiom/cslr/cslr.h>
-
 #include "time.h"
 
 #include "Timer/clocker_drv.h"
@@ -11,39 +9,27 @@
 
 #include "upp/upp.h"
 
+#include "nor/nor.h"
+
 #include "proger/proger.h"
 
-#include "GPIO/gpioMux.h"
 #include "GPIO/gpio.h"
 
 #include "uart_hduplex/uart_hduplex.h"
 #include "UART/uart_messages.h"
 #include "UART/UART_drv.h"
 
-#include "spi/spi.h"
-
 #include "Math/nmr_math.h"
 #include "Math/data_processing.h"
 
-//----------------------------------------------
-/*
-#include <stdio.h>
-#include <stdlib.h>
-#include "math.h"
-#include <c6x.h>
-*/
-
 #include "common_data.h"
-
 #include "Common/OMAPL138_global.h"
 
-#include "PSC/psc.h"
-#include "soc_C6748.h"
+//#include "PSC/psc.h"
+//#include "soc_C6748.h"
 
 #include "Galois/rscoding.h"
 #include "Galois/gf_data.h"
-
-
 
 
 //#define DEBUG_PROGER
@@ -123,6 +109,8 @@ Bool extractDataFromPacks(UART_Message *uart_msg, uint8_t *arr, uint16_t *len);
 void executeProcPack(Data_Proc *proc, int index);
 void toMeasureTemperatures();
 void setDefaultCommSettings();
+
+//void initDataSamples(DataSample **d_samples, int count);
 //-----------------------------------------------------------------------------
 
 
@@ -133,8 +121,14 @@ volatile unsigned int upp_int_status = 0;
 volatile Bool uppFull;
 static volatile unsigned int upp_isr_count = 0;
 volatile Bool modulesEnabled;
-volatile unsigned int pins_reg = 0, pins_reg_prev = 0;
-volatile uint8_t pins_cmd = 0xFF, led_pin15 = 0;
+
+//volatile unsigned int pins_reg = 0, pins_reg_prev = 0;
+//volatile uint8_t pins_cmd = 0xFF, led_pin15 = 0;
+volatile uint32_t pins_cmd = 0xFF;
+volatile uint32_t pins_reg = 0xFF;
+volatile uint8_t pin1_state = 0x00;
+volatile uint8_t pin3_state = 0x00;
+
 
 volatile Bool upp_resetted = FALSE;
 
@@ -155,7 +149,7 @@ Bool device_settings_OK = False;		// = True if ToolChannel data was recieved suc
 #define STB_PINS_COUNT 		4
 volatile uint8_t stb[STB_PINS_COUNT];
 //uint8_t cmd_addr = 0xFF;
-int check_stb();
+//int check_stb();
 
 
 volatile uint8_t tmpb;
@@ -196,6 +190,17 @@ unsigned short *ptr_ui16_buffer;
 int len_ui16_buffer; 										// длина данных, хранящихся в буфере ui16_buffer
 float *bank[10]; 											// = { ptr_data_org, ptr_data1, ptr_data2, ptr_data3, ptr_data4, ptr_data5, ptr_data6, ptr_data7 };
 															// контейнер с указателями на все буферы данных
+
+
+volatile uint32_t processed_data_sample;					// номер последнего обработанного эхо в samples_buffer
+volatile uint32_t current_data_sample;						// текущий элемент в data_samples (счетчик готовых, но еще необработанных данных)
+DataSample **data_samples;									// массив объектов, содержащий указатели на полученные из АЦП данные (в samples_buffer) и описание к этим данным (см. DataSample).
+															// Длина эхо может быть разная - поэтому заранее не известно, сколько можно разместить эхо в области памяти samples_buffer. Под объекты DataSample памяти выделено с некоторым избытком.
+
+volatile int ds_new_data_enabled = 0;						// 0 - новые данные еще не поступили; 1 - данные поступили и записаны в data_samples
+volatile int ds_proc_data_index = 0;						// номер обрабатываемых в данный момент данных в буфере data_samples
+volatile int seq_completed = -1; 							// 1 = последовательность завершилась; 0 = не завершилась; -1 = неопределенное состояние
+volatile int nmr_data_ready = 0;							// 1 = прием всех эхо ЯМР завершился (можно приступить к обработке); 0 = прием данных ЯМР (эхо) не завершился или измерений ЯМР не производится
 
 
 float **data_heap; 											// контейнер долгосрочного хранения данных (расположен в куче)
@@ -268,7 +273,8 @@ Data_Proc *instr_prg; 										// блоки инструкций для обработки данных
 STACKPtrF *data_stack; 										// стек для данных (массивов) типа float: data1, data2, data3, ...
 float XX[XX_LEN]; 											// ячейки памяти X0, X1, X2, X3
 
-volatile uint8_t device_id; 								// идентификатор устройства, данные которого обрабатываются по сигналу GPIO GP[1]
+volatile uint8_t device_id = 0; 							// идентификатор устройства, данные которого обрабатываются по сигналу GPIO GP[1]
+volatile uint8_t channel_id = 0;
 
 uint8_t pp_is_seq_done = 0;									// индикатор завершения последовательности по команде COM_STOP
 
@@ -295,7 +301,6 @@ unsigned int press_unit_data;								// контейнер для данных прижимного устройст
 volatile PressureUnitState press_unit_ready = PRESS_UNIT_NOT_READY;	// флаг готовности измерить данные прижимного устройства
 #endif
 // ---------------------------------------------------------------------------
-
 
 
 CSL_UartRegsOvly uartRegs;
@@ -336,7 +341,6 @@ void main(void)
 	// ********** Init Devices ************************************************ //
 	create_Clockers();
 
-
 	//_enable_interrupts(); // ??? should be _disable_interrupts(); I think??? (aivanov)
 
 	// Timer initialization ---------------------------------------------------
@@ -357,8 +361,10 @@ void main(void)
 	if(check_psc_transition(CSL_PSC_1) == pscTimeout) return;
 
 	// Enable peripherals; Initiate transition
-	//CSL_FINST(psc1Regs->MDCTL[CSL_PSC_GPIO], PSC_MDCTL_NEXT, ENABLE);
-	//CSL_FINST(psc1Regs->PTCMD, PSC_PTCMD_GO0, SET);
+	CSL_FINST(psc1Regs->MDCTL[CSL_PSC_GPIO], PSC_MDCTL_NEXT, ENABLE);
+	CSL_FINST(psc1Regs->PTCMD, PSC_PTCMD_GO0, SET);
+	//CSL_FINST(UPP0Regs->UPIER, UPP_UPIER_EOWI, TRUE);
+	//CSL_PSC_PTCMD_GO0_SET
 
 	// Ensure previous initiated transitions have finished
 	if(check_psc_transition(CSL_PSC_1) == pscTimeout) return;
@@ -510,7 +516,6 @@ void main(void)
 	// ------------------------------------------------------------------------
 
 
-
 	// ********** Finish (Initialization of Devices) **************************
 
 	//uint8_t simple_uart_message[128] = {'D', 'S', 'P', '_', '0', '.', '4', '9', ' ', '(', '2', '9', '.', '1', '1', '.', '1', '6', ')', '\n', 0};
@@ -564,6 +569,28 @@ void main(void)
 	bank[8] = ptr_temp_data;
 	bank[9] = ptr_w;
 
+	data_samples = (DataSample**)calloc(UPP_DATA_COUNT, sizeof(DataSample*));
+	for (i = 0; i < UPP_DATA_COUNT; i++)
+	{
+		DataSample *data_sample = (DataSample*) malloc(sizeof(DataSample));
+
+		uint8_t *data_ptr = (uint8_t*)calloc(UPP_BUFF_SIZE, sizeof(uint8_t));
+		data_sample->data_ptr = data_ptr;
+		data_sample->data_len = 0;
+		data_sample->echo_number = 0;
+		data_sample->proc_id = 0;
+		data_sample->tool_id = 0;
+		data_sample->channel_id = 0;
+		//data_sample->heap_ptr = data_heap[i];
+		//data_sample->heap_len = 0;
+		data_sample->tag = 0;
+
+		data_samples[i] = data_sample;
+	}
+	current_data_sample = 0;
+	ds_new_data_enabled = 0;
+	processed_data_sample = 0;
+
 	data_heap = (float**) calloc(DATA_HEAP_COUNT, sizeof(float*));
 	for (i = 0; i < DATA_HEAP_COUNT; i++)
 	{
@@ -594,6 +621,9 @@ void main(void)
 	instr_prg = (Data_Proc*) malloc(sizeof(Data_Proc));
 	init_DataProc(instr_prg); 								// инициализация структуры для хранения программы обработки данных ЯМР/СДСП и т.п.
 
+	instr = (Data_Cmd*) malloc(sizeof(Data_Cmd));
+	init_DataProcCmd(instr);
+
 	data_stack = (STACKPtrF*) malloc(sizeof(STACKPtrF));
 
 	device_id = 0; 											// No device
@@ -607,13 +637,6 @@ void main(void)
 	t_stop = clock();
 	t_overhead = t_stop - t_start;
 
-
-
-#ifdef USE_TIMING
-	uint32_t tsch = TSCH;
-	uint32_t tscl = TSCL;
-	TimingProc_Buffer_Init(&timing_buffer, tsch, tscl);
-#endif
 
 	upp_start(byte_count, line_count, upp_buffer);
 
@@ -642,51 +665,40 @@ void main(void)
 	fpga_prg_started = False;
 
 
-	instr = (Data_Cmd*) malloc(sizeof(Data_Cmd));
-	init_DataProcCmd(instr);
-
 	// Start main loop --------------------------------------------------------
+	int proc_samples[100];
+	int samples_counter = 0;
+	memset(&proc_samples[0], 0x00, 100*sizeof(int));
 	printf("Start!\n");
-	P15_CLR();
+	//P15_CLR();
 	tmpb = 0;
 	//volatile int ready_msg_sent = 0;
 	while (app_finish == 0)
 	{
-		/*if (tool_state != UNKNOWN_STATE)*/ //tool_state = defineToolState();
-		check_stb();
+		if (ds_new_data_enabled == 1)
+		{
+			setupDDR2Cache();
+			enableCacheL1();
 
-		if (stb[3] == STB_FALLING_EDGE) 	tool_state = NOT_READY;
-		else if (stb[3] == STB_RISING_EDGE) tool_state = READY;
-		else if (stb[3] == STB_HIGH_LVL) 	tool_state = FREE;
-		else if (stb[3] == STB_LOW_LVL)	 	tool_state = BUSY;
+			ds_proc_data_index = current_data_sample;
+			int data_samples_count = ds_proc_data_index - processed_data_sample;
+			for (i = 0; i < data_samples_count; i++)
+			{
+				DataSample *ds = data_samples[i+processed_data_sample];					// забрать свежие данные
+				move_ToFirstDataProcCmd(ds->proc_id-1, instr_prg);
+				//executeProcPack(instr_prg, ds->proc_id-1);
+				processed_data_sample++;
+			}
+			ds_new_data_enabled = 0;
+
+			disableCache();
+		}
+
+		/*if (tool_state != UNKNOWN_STATE)*/ //tool_state = defineToolState();
 
 		if (tool_state == READY) // прибор готов к приему/передаче данных по кабелю (получен сигнал GP0[3] "up")
 		{
-#ifdef USE_TIMING
-			// proc_id:
-			// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-			// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-			// byte 3 - hard_echo_counter (highest byte)
-			// byte 2 - hard_echo_counter (lowest byte)
-			// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-			uint32_t tsch = TSCH;
-			uint32_t tscl = TSCL;
-
-			uint8_t gpio_status = (uint8_t)((READY << 4) | 3);
-			uint32_t proc_id = gpio_status;
-
-			if (TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl) == True && launch_counter == 4)
-			//if (TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl) == True && soft_echo_counter < 200)
-			//if (TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl) == True && hard_echo_counter != 100)
-			{
-				TimingProc_Buffer_Print2(&timing_buffer);
-				printf("%d\n\n", hard_echo_counter);
-			}
-#endif
-
-			//printf("\n");
-
-			launch_counter++;
+//			launch_counter++;
 
 			//_disable_interrupts();		// commented 12.10.2020
 			QUEUE8_clear(uart_queue);
@@ -703,29 +715,37 @@ void main(void)
 			//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 			//memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
 
+			//printf("Echoes were recieved: %i\n", /*processed_data_sample*/ processed_data_sample);
+
 			/*
-			//if (telemetry_ready == TELE_READY)
+			if (samples_counter < 100)
 			{
-				toMeasureTemperatures();
-				telemetry_ready = TELE_NOT_READY;
-			}*/
+				proc_samples[samples_counter] = processed_data_sample;
+				samples_counter++;
+			}
+			else
+			{
+				for (i = 0; i < 100; i++) printf("Echoes were recieved: %i\n", proc_samples[i]);
+				samples_counter = 0;
+				memset(&proc_samples[0], 0x00, 100*sizeof(int));
+			}
+			*/
+
+			processed_data_sample = 0;
+			ds_proc_data_index = 0;
+
 #ifdef USE_TELEMETRIC_UART
 			if (telemetry_ready == TELE_NOT_READY)
 			{
 				temp_request_mode = TEMP_NOT_DEFINED;
 				voltage_request_mode = VOLT_NOT_DEFINED;
 				toMeasureTemperatures();
+
 				//telemetry_ready = TELE_READY;
 				//telemetry_ready = TELE_NOT_READY;
 			}
 #endif
 
-/*			uint8_t pg = (uint8_t) proger_rd_pwr_pg();
-			uint8_t tele_flag = 0;
-			if (UART_telemetric_counter == TELEMETRIC_UART_BUF_LEN) tele_flag = 1;
-#ifdef USE_PRESSURE_UNIT
-			if (press_unit_ready == PRESS_UNIT_READY) tele_flag = 1;
-#endif */
 			unsigned int tele_flag = 0;
 #ifdef USE_TELEMETRIC_UART
 			if (temperature_mode == TEMP_MODE_NOT_SPVP) if (UART_telemetric_counter % TELEMETRIC_DATA_LEN == 0 && UART_telemetric_counter > 0) tele_flag = 1;
@@ -746,8 +766,6 @@ void main(void)
 			pp_is_seq_done = proger_is_seq_done();
 			uint8_t out_mask = pg | (tele_flag << 1) | (pp_is_started << 2) | (pp_is_seq_done << 3);
 			sendByteArray(NMRTool_Ready[out_mask], SRV_MSG_LEN + 2, uartRegs);
-			//ready_msg_sent++;
-			//if (ready_msg_sent > 1) printf("Ready: %d\n", ready_msg_sent);
 
 			if (timerSettings.enabled == False)
 			{
@@ -758,24 +776,6 @@ void main(void)
 		}
 		else if (tool_state == NOT_READY) // прибор завершил сеанс приема/передачи данных по кабелю (получен сигнал GP0[3] "down")
 		{
-#ifdef USE_TIMING
-			// proc_id:
-			// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-			// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-			// byte 3 - hard_echo_counter (highest byte)
-			// byte 2 - hard_echo_counter (lowest byte)
-			// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-			uint32_t tsch = TSCH;
-			uint32_t tscl = TSCL;
-			TimingProc_Buffer_Init(&timing_buffer, tsch, tscl);
-
-			uint32_t proc_id = 0;
-			uint8_t gpio_status = (uint8_t)((NOT_READY << 4) | 3);
-			proc_id = gpio_status;
-
-			TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
-
 			memset(&data_fin[0], 0x0, ALLDATA_BUFF_SIZE * sizeof(unsigned char));
 			data_fin_counter = 0;
 
@@ -790,10 +790,7 @@ void main(void)
 			tool_state = BUSY;
 			outcom_msg_state = NOT_BUILT;
 
-			GPIOBank0Pin1_initState(GPIO_HIGH_STATE);
 			sendByteArray(&NMRTool_NotReady[0], SRV_MSG_LEN + 2, uartRegs);
-			//ready_msg_sent = 0;
-			//printf("Not Ready: %d\n", notready_msg_sent);
 
 			upp_counter = 0;
 			//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
@@ -807,14 +804,9 @@ void main(void)
 			}
 		}
 
-		if (tool_state == BUSY) // прибор не доступен для приема/передачи данных по кабелю (находится в состоянии приема и обработки данных ЯМР, GP0[3] = "down")
+/*		if (tool_state == BUSY) // прибор не доступен для приема/передачи данных по кабелю (находится в состоянии приема и обработки данных ЯМР, GP0[3] = "down")
 		{
 			uppFull = False;
-
-			//if (stb[1] == 3 || stb[1] == 4)
-			//{
-			//	printf("Pin1 = %d,\tPins_cmd = %d\n", stb[1], pins_cmd);
-			//}
 
 			if (stb[1] == STB_FALLING_EDGE && pins_cmd == SDSP_TOOL)
 			{
@@ -822,7 +814,7 @@ void main(void)
 				int channel_data_id = proger_rd_ch_number();
 				processing_params->channel_id = channel_data_id;
 			}
-			if (stb[1] == STB_RISING_EDGE && device_id == SDSP_TOOL /*&& pins_cmd != 0x00*/)
+			if (stb[1] == STB_RISING_EDGE && device_id == SDSP_TOOL)
 			{
 				setupDDR2Cache();
 				enableCacheL1();
@@ -846,29 +838,10 @@ void main(void)
 				device_id = NMR_TOOL;
 				int channel_data_id = proger_rd_ch_number();
 				processing_params->channel_id = channel_data_id;
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				uint32_t tsch = TSCH;
-				uint32_t tscl = TSCL;
-
-				uint32_t proc_id = 0;
-				uint8_t gpio_status = (uint8_t)((STB_FALLING_EDGE << 4) | 1);
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (uint32_t)gpio_status;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
-
 			}
 			//else if (pin1_state == GPIO_RISE_STATE && device_id == NMR_TOOL && cmd_addr != 0x00)
 			if (stb[1] == STB_RISING_EDGE && device_id == NMR_TOOL && pins_cmd != 0x00)
 			{
-				//P15_SET();
 				upp_resetted = upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 				if (upp_resetted == FALSE)
 				{
@@ -877,33 +850,13 @@ void main(void)
 
 				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
 
-				/*t_start = clock();
-				t_stop = clock();
-				t_overhead = t_stop - t_start;
-				t_start = clock();*/
+				//t_start = clock();
+				//t_stop = clock();
+				//t_overhead = t_stop - t_start;
+				//t_start = clock();
 
 				setupDDR2Cache();
 				enableCacheL1();
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				uint32_t tsch = TSCH;
-				uint32_t tscl = TSCL;
-
-				//dummyDelay(2);
-
-				uint32_t proc_id = 0;
-				uint8_t gpio_status = (uint8_t)((STB_RISING_EDGE << 4) | 1);
-				hard_echo_counter = proger_rd_echo_count();
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (hard_echo_counter << 8) | (uint32_t)gpio_status;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
 #ifndef USE_TIMING
 				dummyDelay(2);
 				hard_echo_counter = proger_rd_echo_count();
@@ -915,11 +868,6 @@ void main(void)
 				//soft_arr[soft_echo_counter - 1] = soft_echo_counter;
 				//hard_arr[soft_echo_counter - 1] = hard_echo_counter;
 				//if (soft_echo_counter != hard_echo_counter) error_echo_counter++;
-
-				/*if (hard_echo_counter == 0)
-				 {
-				 printf("hard counter = %d\tsoft counter = %d\n", hard_echo_counter, soft_echo_counter);
-				 }*/
 
 				processing_params->current_echo = hard_echo_counter;
 				processing_params->points_count = recievied_adc_points_count;
@@ -937,27 +885,6 @@ void main(void)
 					move_ToFirstDataProcCmd(proc_index - 1, instr_prg);
 					executeProcPack(instr_prg, proc_index - 1);
 				}
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				tsch = TSCH;
-				tscl = TSCL;
-
-				proc_id = 0;
-				//gpio_status = 1;
-				uint32_t h_echo_number = proger_rd_echo_count();
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (h_echo_number << 8) | (uint32_t)pins_cmd;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
-
-				//if (proc_index != 1) printf("nmr = %d, ", proc_index);
-
 				device_id = 0; // No device
 
 				memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
@@ -974,7 +901,6 @@ void main(void)
 
 				//t_stop = clock();
 				//printf("\t NMR data processing time: %d clock cycles\n", (t_stop - t_start) - t_overhead);
-				//P15_CLR();
 			}
 
 			// ******************** GAMMA Tool... ************************
@@ -983,46 +909,11 @@ void main(void)
 				device_id = GAMMA_TOOL;
 				int channel_data_id = proger_rd_ch_number();
 				processing_params->channel_id = channel_data_id;
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				uint32_t tsch = TSCH;
-				uint32_t tscl = TSCL;
-
-				uint32_t proc_id = 0;
-				uint8_t gpio_status = (uint8_t)((STB_FALLING_EDGE << 4) | 1);
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (uint32_t)gpio_status;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
 			}
 			if (stb[1] == STB_RISING_EDGE && device_id == GAMMA_TOOL && pins_cmd != 0x00)
 			{
 				setupDDR2Cache();
 				enableCacheL1();
-
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				uint32_t tsch = TSCH;
-				uint32_t tscl = TSCL;
-
-				uint32_t proc_id = 0;
-				uint8_t gpio_status = (uint8_t)((STB_RISING_EDGE << 4) | 1);
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (uint32_t)gpio_status;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
 
 				int proc_index = pins_cmd;
 				if (proc_index < MAX_PROCS)
@@ -1033,27 +924,6 @@ void main(void)
 
 				device_id = 0; // No device
 				disableCache();
-
-				/*led_pin15 = ~led_pin15;
-				 if (led_pin15) P15_SET();
-				 else P15_CLR();*/
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				tsch = TSCH;
-				tscl = TSCL;
-
-				proc_id = 0;
-				gpio_status = 1;
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (uint32_t)gpio_status;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
 			}
 
 			// ******************** DUMMY Tool... ************************
@@ -1063,49 +933,12 @@ void main(void)
 				device_id = DUMMY_TOOL;
 				int channel_data_id = proger_rd_ch_number();
 				processing_params->channel_id = channel_data_id;
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				uint32_t tsch = TSCH;
-				uint32_t tscl = TSCL;
-
-				uint32_t proc_id = 0;
-				uint8_t gpio_status = (uint8_t)((STB_FALLING_EDGE << 4) | 1);
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (uint32_t)gpio_status;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
-
 			}
 			//if (pin1_state == GPIO_RISE_STATE && device_id == DUMMY_TOOL && cmd_addr != 0x00)//
 			if (stb[1] == STB_RISING_EDGE && device_id == DUMMY_TOOL && pins_cmd != 0x00)
 			{
-				//P15_SET();
-
 				setupDDR2Cache();
 				enableCacheL1();
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				uint32_t tsch = TSCH;
-				uint32_t tscl = TSCL;
-
-				uint32_t proc_id = 0;
-				uint8_t gpio_status = (uint8_t)((STB_RISING_EDGE << 4) | 1);
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (uint32_t)gpio_status;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
 
 				//int proc_index = cmd_addr;
 				int proc_index = pins_cmd;
@@ -1117,25 +950,6 @@ void main(void)
 
 				device_id = 0; // No device
 				disableCache();
-
-				//printf("dummy = %d, ", proc_index);
-
-#ifdef USE_TIMING
-				// proc_id:
-				// |-- H.byte 4 --|--- byte 3 ---|--- byte 2 ---|-- 1 byte 1 --|
-				// H.byte 4 (highest byte) - id устройства, с которым в данный момент идет работа (см. NMR_TOOL, GAMMA_TOOL и т.д.)
-				// byte 3 - hard_echo_counter (highest byte)
-				// byte 2 - hard_echo_counter (lowest byte)
-				// L.byte 1 (lowest byte) - GPIO 1-3 state: 4 h.bits - GPIO status, 4 l.bits - GPIO number (1,2 or 3)
-				tsch = TSCH;
-				tscl = TSCL;
-
-				proc_id = 0;
-				gpio_status = 1;
-				proc_id = ((proc_id | (uint32_t)device_id) << 24) | (uint32_t)gpio_status;
-
-				TimingProc_Buffer_Add(&timing_buffer, proc_id, tsch, tscl);
-#endif
 			}
 
 			if (timerSettings.enabled == True)
@@ -1143,7 +957,7 @@ void main(void)
 				timerSettings.enabled = False;
 				disable_Timer(tmrRegs);
 			}
-		}
+		}*/
 
 		if (tool_state == FREE) // прибор находится в состоянии приема/передачи данных по кабелю (GP0[3] = "up")
 		{
@@ -1255,19 +1069,6 @@ void main(void)
 			incom_msg_state = NOT_DEFINED;
 			//_enable_interrupts();					// commented 12.10.2020
 		}
-
-		//if (incom_msg_state == NOT_DEFINED && tool_state != BUSY)
-		/*if (incom_msg_state == NOT_DEFINED && tool_state == FREE)
-		{
-			if (telemetry_ready == TELE_NOT_READY && temp_request_mode == TEMP_NOT_DEFINED)
-			{
-				temp_request_mode = TEMP_NOT_DEFINED;
-				voltage_request_mode = VOLT_NOT_DEFINED;
-				toMeasureTemperatures();
-
-				//telemetry_ready = TELE_NOT_READY;
-			}
-		}*/
 
 		//uint8_t pp_is_started  = proger_is_started();
 		uint8_t _pp_is_seq_done = proger_is_seq_done();
@@ -1594,19 +1395,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 			sendMultyPackMsg(&out_msg, uartRegs);
 
 			clearMsgHeader(out_msg.msg_header);
-
-			/*if (tool_state == UNKNOWN_STATE)
-			{
-				startClocker(clocker3);
-			}*/
-
-			/*uint16_t pack_cnt = out_msg.pack_cnt;
-			 int i;
-			 for (i = 0; i < pack_cnt; i++)
-			 {
-			 free(out_msg.msg_packs[i]);
-			 //clearMsgPacket(out_msg.msg_packs[i]);
-			 }*/
 		}
 		break;
 	}
@@ -1687,19 +1475,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 		disable_Timer(tmrRegs);
 
 		proger_start();
-		// Added 9.03.2019 --------------------------
-		/*uint8_t pp_is_started  = proger_is_started();
-		int attempts = 0;
-		while (attempts < 10 && !pp_is_started)
-		{
-			proger_start();
-			dummyDelay(1);
-			pp_is_started  = proger_is_started();
-			attempts++;
-			if (!pp_is_started) printf("not started yet!\n");
-		}
-		// ------------------------------------------
-		*/
 
 		break;
 	}
@@ -2232,10 +2007,6 @@ void init_UART_MsgData(void)
 	QUEUE8_init(MAX_BODY_LEN, uart_queue);
 }
 
-unsigned int GP0_1_rise(void)
-{
-	return 0;
-}
 
 /*-----------------------------------------------------------------------------
  * 							Interrupt Functions
@@ -2317,32 +2088,170 @@ interrupt void UART_isr(void)
 interrupt void upp_isr(void)
 {
 	upp_isr_count++;
-//	printf("\tUPP ISR OK!  # \t%d.", ++upp_isr_count);
 
 	// Determine Pending Interrupt
 	upp_int_status = UPP0Regs->UPISR;
 
 	if ((upp_int_status & CSL_UPP_UPISR_EOWI_MASK) 	== (1 << CSL_UPP_UPISR_EOWI_SHIFT))
 	{
-//		printf("\tEOW chA");
 		CSL_FINST(UPP0Regs->UPIER, UPP_UPIER_EOWI, TRUE);
-		// clear int-t flag
 		uppFull = TRUE;
 	};
 
 	if ((upp_int_status & CSL_UPP_UPISR_EOLI_MASK) == (1 << CSL_UPP_UPISR_EOLI_SHIFT))
 	{
-		//printf("\tEOL chA");
 		CSL_FINST(UPP0Regs->UPIER, UPP_UPIER_EOLI, TRUE);
-		// clear int-t flag
-		//uppFull = TRUE;
 	};
-//	printf("\n");
 }
+
 
 interrupt void GPIO_isr(void)
 {
+	/* The interrupt handler for the GPIO interrupts                          */
 
+	/* the interrupt could have been because of any one of the pins in the    *
+	* bank 0. Hence we will only check if the pin3 or pin2 or pin1 is         *
+	* generating the interrupt and then reset it and exit.                    */
+
+	if (gpioRegs->BANK[0].INTSTAT & CSL_GPIO_INTSTAT_STAT1_MASK)
+	{
+		pins_reg = GPIO_B0_RD();
+		pin1_state = (pins_reg & 0x02) >> 1;
+		pins_cmd = (pins_reg >> 5) & 0x000000FF;
+
+		if (pin1_state == 0)
+		{
+			switch (pins_cmd)
+			{
+			case NMR_TOOL:
+			case DUMMY_TOOL:
+			case GAMMA_TOOL:
+			{
+				device_id = pins_cmd;
+				channel_id = proger_rd_ch_number();
+				break;
+			}
+			default:
+			{
+				device_id = 0;
+				channel_id = 0;
+				break;
+			}
+			}
+		}
+		else if (pin1_state == 1)
+		{
+			switch (device_id)
+			{
+			case NMR_TOOL:
+			{
+				upp_resetted = upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
+
+				ds_new_data_enabled = 0;
+
+				int upp_data_len = proger_rd_adc_points_count();
+				int upp_echo_number = proger_rd_echo_count();
+
+				if (current_data_sample < (UPP_DATA_COUNT - 1) )
+				{
+					data_samples[current_data_sample]->tool_id = device_id;
+					data_samples[current_data_sample]->channel_id = channel_id;
+					data_samples[current_data_sample]->data_len = upp_data_len;
+					data_samples[current_data_sample]->echo_number = upp_echo_number;
+					data_samples[current_data_sample]->proc_id = pins_cmd;
+					//data_samples[current_data_sample]->data_ptr = samples_buffer + samples_buffer_pos;
+					//samples_buffer_pos += upp_data_len;
+
+					setupDDR2Cache();
+					enableCacheL1();
+					memcpy(data_samples[current_data_sample]->data_ptr, upp_buffer, upp_data_len*sizeof(uint8_t));
+					disableCache();
+
+					processing_params->channel_id = channel_id;
+					processing_params->current_echo = upp_echo_number;
+					processing_params->points_count = upp_data_len;
+
+					current_data_sample++;
+				}
+
+				seq_completed = 0;			// последовательность еще не законченна
+				ds_new_data_enabled = 1;	// поступили новые данные
+
+				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
+
+				break;
+			}
+			case DUMMY_TOOL:
+			{
+				/* Temporary !!!
+				//processing_params->proc_cmd = pins_cmd;
+				data_samples[current_data_sample]->tool_id = device_id;
+				data_samples[current_data_sample]->channel_id = channel_id;
+				data_samples[current_data_sample]->data_len = 0;
+				data_samples[current_data_sample]->echo_number = 0;
+				data_samples[current_data_sample]->proc_id = pins_cmd;
+				data_samples[current_data_sample]->data_ptr = NULL;
+				*/
+
+				//seq_completed = 1;			// можно приступить к обработке данных NMR
+
+				break;
+			}
+			case GAMMA_TOOL:
+			{
+				int proc_index = pins_cmd;
+				if (proc_index < MAX_PROCS)
+				{
+					move_ToFirstDataProcCmd(proc_index - 1, instr_prg);
+					executeProcPack(instr_prg, proc_index - 1);
+				}
+
+				device_id = 0; 				// No device
+				break;
+			}
+			default:
+			{
+				device_id = 0;
+				channel_id = 0;
+				break;
+			}
+			}
+		}
+
+	    /* reset the interrupt status register                                */
+		gpioRegs->BANK[0].INTSTAT |= 0x02;
+	}
+	if (gpioRegs->BANK[0].INTSTAT & CSL_GPIO_INTSTAT_STAT2_MASK)
+	{
+		/* reset the interrupt source (so that multiple interrupts dont ccur  */
+	    //CSL_FINS(gpioRegs->BANK[0].OUT_DATA,GPIO_OUT_DATA_OUT2,0);
+
+	    /* reset the interrupt status register                                */
+	    CSL_FINS(gpioRegs->BANK[0].INTSTAT, GPIO_INTSTAT_STAT2, 0);
+	}
+	if (gpioRegs->BANK[0].INTSTAT & CSL_GPIO_INTSTAT_STAT3_MASK)
+	{
+		unsigned int pins_reg = GPIO_B0_RD();
+		uint8_t pin3_state = (pins_reg & 0x08) >> 3;
+
+		if (pin3_state == 1)
+		{
+			tool_state = READY;
+			seq_completed = 1; //перенесено выше. Теперь признаком завершения последовательности является приход DUMMY_TOOL - можно приступить обрабатывать данные
+			//printf("Number of last obtained echo: %i\n", current_data_sample);
+		}
+		else if (pin3_state == 0)
+		{
+			current_data_sample = 0;
+			processed_data_sample = 0;
+			seq_completed = 0;
+
+			tool_state = NOT_READY;
+		}
+
+	    /* reset the interrupt status register                                */
+		gpioRegs->BANK[0].INTSTAT |= 0x08;
+	}
 }
 
 interrupt void UART_Telemitric_isr(void)
@@ -2470,7 +2379,7 @@ void clocker2_ISR(void)
 	hdr->data[0] = DATA_FAILED;
 	hdr->data[1] = msg_was_treated;
 
-	int d_len = uart_queue->cnt;
+	//int d_len = uart_queue->cnt;
 	//printf("Received bytes: %d\n",d_len);
 
 	sendShortMsg(hdr, uartRegs);
@@ -2822,12 +2731,6 @@ void pressureUnitDataToOutput(OutBuffer *out_buff)
 	signed int mtr_counter = proger_read_counter_mtr ();
 	unsigned int mtr_status = proger_read_mtr_status ();
 
-	/*if ((mtr_status & 0x4) >> 2 && clocker4->max_val < 10000)
-	{
-		clocker4->max_val = 10000;
-		startClocker(clocker4);
-	}*/
-
 	float *dst = out_buff->out_data;
 	int dst_pos = out_buff->full_size;
 	int data_cnt = out_buff->outdata_counter;
@@ -2846,10 +2749,6 @@ void pressureUnitDataToOutput(OutBuffer *out_buff)
 	out_buff->full_size += dst_pos;
 
 	press_unit_ready = PRESS_UNIT_NOT_READY;
-
-	//uint32_t tmp[1024];
-	//memcpy(&tmp[0], out_buff->out_data, dst_pos*sizeof(uint32_t));
-	//int tt = 0;
 }
 #endif
 
@@ -3584,6 +3483,36 @@ void executeProcPack(Data_Proc *proc, int index)
 
 }
 
+
+// Init Samples Buffer --------------------------------------------------------
+/*void initDataSamples(DataSample **d_samples, int count)
+{
+	int i;
+	for (i = 0; i < count; i++)
+	{
+		DataSample *data_sample = (DataSample*) malloc(sizeof(DataSample));
+
+		data_sample->data_ptr = NULL;
+		data_sample->data_len = 0;
+		data_sample->echo_number = 0;
+		data_sample->proc_id = 0;
+		data_sample->tool_id = 0;
+		data_sample->channel_id = 0;
+		//data_sample->heap_ptr = data_heap[i];
+		//data_sample->heap_len = 0;
+		data_sample->tag = 0;
+
+		d_samples[i] = data_sample;
+	}
+
+	current_data_sample = 0;
+	samples_buffer_pos = 0;
+	ds_new_data_enabled = 1;
+	//ds_proc_data_index = 0;
+}
+*/
+
+/*
 int check_stb()
 {
 	static volatile uint32_t pin, pin_prev;
@@ -3620,6 +3549,7 @@ int check_stb()
 
 	return (ret_code);
 }
+*/
 
 void toMeasureTemperatures()
 {
