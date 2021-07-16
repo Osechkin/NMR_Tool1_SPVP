@@ -355,8 +355,8 @@ int findMsgPackets2(BUFFER8 *_buff, UART_Message *_uart_msg, GF_Data *_gf_data)
 	uint8_t pack_number = 0;
 	while (BUFFER8_count(_buff) > 0)
 	{
-		MsgPacket *pack = (MsgPacket*)malloc(sizeof(MsgPacket));
-		//MsgPacket *pack = _uart_msg->msg_packs[pack_number];
+		//MsgPacket *pack = (MsgPacket*)malloc(sizeof(MsgPacket));
+		MsgPacket *pack = _uart_msg->msg_packs[pack_number];
 		initMsgPacket(_msg_header, pack, ++pack_number);
 		uint8_t *data_arr = &pack->data[0];
 		uint8_t *data_cnt = &pack->data_len;

@@ -889,7 +889,8 @@ void main(void)
 
 				int i;
 				uint16_t pack_cnt = in_msg.pack_cnt;
-				for (i = 0; i < pack_cnt; i++) free(in_msg.msg_packs[i]); // added 3.09.2015
+				//for (i = 0; i < pack_cnt; i++) free(in_msg.msg_packs[i]); // added 3.09.2015
+				for (i = 0; i < pack_cnt; i++) clearMsgPacket(in_msg.msg_packs[i]);
 				in_msg.pack_cnt = 0;
 				in_msg.msg_header->pack_count = 0;
 				//deleteMsgPackets(&in_msg);
@@ -1027,7 +1028,7 @@ void onDataAvailable(QUEUE8* bytes)
 							int pack_count = (int) in_msg_header->pack_count;
 							int pack_len = (int) in_msg_header->pack_len;
 							//int inter_pack_delays = msg_settings->pack_delay * pack_count;
-							uint64_t packs_delay = 1000 /* + inter_pack_delays * 2*/ + (pack_count * pack_len) / (uartSettings.BaudRate / 8.0) * 1000 * 2; // 2 - двойной запас по времени // it was 50
+							uint64_t packs_delay = 3000 /* + inter_pack_delays * 2*/ + (pack_count * pack_len) / (uartSettings.BaudRate / 8.0) * 1000 * 2; // 2 - двойной запас по времени // it was 50
 							//uint64_t packs_delay = 5000 + (pack_count * pack_len) / (uartSettings.BaudRate / 8.0) * 1000;
 							initClocker(packs_delay, clocker2_ISR, clocker2);
 							startClocker(clocker2);
@@ -1103,7 +1104,8 @@ void onDataAvailable(QUEUE8* bytes)
 					else
 					{
 						int i;
-						for (i = 0; i < in_msg.pack_cnt; i++) free(in_msg.msg_packs[i]); // added 3.09.2015
+						//for (i = 0; i < in_msg.pack_cnt; i++) free(in_msg.msg_packs[i]); // added 3.09.2015
+						for (i = 0; i < in_msg.pack_cnt; i++) clearMsgPacket(in_msg.msg_packs[i]);
 						in_msg.pack_cnt = 0;
 
 						msg_header_state = FAILED;
@@ -1113,7 +1115,8 @@ void onDataAvailable(QUEUE8* bytes)
 				else
 				{
 					int i;
-					for (i = 0; i < in_msg.pack_cnt; i++) free(in_msg.msg_packs[i]); // added 3.09.2015
+					//for (i = 0; i < in_msg.pack_cnt; i++) free(in_msg.msg_packs[i]); // added 3.09.2015
+					for (i = 0; i < in_msg.pack_cnt; i++) clearMsgPacket(in_msg.msg_packs[i]);
 					in_msg.pack_cnt = 0;
 
 					msg_was_treated = MSG_DECODE_ERR;
@@ -1834,13 +1837,13 @@ void init_UART_MsgData(void)
 	in_msg_header = (MsgHeader*) malloc(sizeof(MsgHeader));
 	clearMsgHeader(in_msg_header);
 	in_msg.msg_header = in_msg_header;
-	/*for (i = 0; i < MAX_PACK_CNT; i++)
-	 {
-	 MsgPacket *pack = (MsgPacket*)malloc(sizeof(MsgPacket));
-	 clearMsgPacket(pack);
-	 in_msg.msg_packs[i] = pack;
-	 }*/
-	for (i = 0; i < MAX_PACK_CNT; i++) in_msg.msg_packs[i] = NULL;
+	for (i = 0; i < MAX_PACK_CNT; i++)
+	{
+		MsgPacket *pack = (MsgPacket*)malloc(sizeof(MsgPacket));
+		clearMsgPacket(pack);
+		in_msg.msg_packs[i] = pack;
+	}
+	//for (i = 0; i < MAX_PACK_CNT; i++) in_msg.msg_packs[i] = NULL;
 	in_msg.pack_cnt = 0;
 
 	out_msg_header = (MsgHeader*) malloc(sizeof(MsgHeader));
