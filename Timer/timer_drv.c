@@ -34,7 +34,7 @@ void setup_Timer(CSL_TmrRegsOvly tmrRegs, Timer_Settings timerSettings)
 	CSL_FINST(tmrRegs->TCR, TMR_TCR_CLKSRC12, INTERNAL);
 
 	// Set Timer0:12 Period (1 ms)
-	CSL_FINS(tmrRegs->PRD12, TMR_PRD12_PRD12, (timerSettings.freq));
+	CSL_FINS(tmrRegs->PRD12, TMR_PRD12_PRD12, /*(timerSettings.freq)*/ (CSL_ASYNC_FREQ));	// 120000 = 5 ms
 
 	// Disable the New Timer Features
 	CSL_FINST(tmrRegs->TGCR, TMR_TGCR_PLUSEN, DISABLE);
@@ -153,7 +153,7 @@ void setup_Timer_INTC (CSL_TmrRegsOvly tmrRegs, int INTC)
 
 void enable_Timer(CSL_TmrRegsOvly tmrRegs)
 {
-	if (tmrRegs == tmr0Regs) CSL_FINST(tmr0Regs->TCR, TMR_TCR_ENAMODE12, EN_CONT);
+	if (tmrRegs == tmr0Regs) CSL_FINST(tmr0Regs->TCR, TMR_TCR_ENAMODE12, EN_CONT);		 // CSL_TMR_TCR_ENAMODE12_EN_CONT
 	else if (tmrRegs == tmr1Regs) CSL_FINST(tmr1Regs->TCR, TMR_TCR_ENAMODE12, EN_CONT);
 	else return;
 }

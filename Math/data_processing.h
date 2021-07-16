@@ -96,6 +96,8 @@ uint16_t TimingProc_Buffer_Count(TimingProc_Buffer *timproc_buff);
 void TimingProc_Buffer_Print1(TimingProc_Buffer *timproc_buff, uint16_t echo_index);	// echo_index - номер "цикла" измерений, на котором необходимо распечатать результаты
 void TimingProc_Buffer_Print2(TimingProc_Buffer *timproc_buff);							// безусловный вывод результатов
 
+uint64_t Profiler_Start(uint32_t tsch, uint32_t tscl);									// Старт простого профайлера времени выполнения участка кода
+uint32_t Profiler_Stop(uint64_t clock_start, uint32_t tsch, uint32_t tscl);				// Останов простого профайлера измерения времени выполнения участка кода (выход - время в мкс)
 
 
 typedef unsigned short Bool;
@@ -223,6 +225,8 @@ typedef unsigned short Bool;
 #define INS_SGN_PROC2		95	// Метод #2 обработки сигнала спинового эхо
 #define INS_NS_SGN_UPP_PRE3	96	// Метод #3 накопления и предварительной обработки данных шума и сигнала в буфере АЦП
 #define INS_SGN_PROC3		97	// Метод #3 обработки сигнала спинового эхо
+#define INS_KPMG_PREPROCESS	98	// Метод предобработки записанных спиновых эхо, измеренных при помощи последовательности КПМГ
+#define INS_KPMG_PROCESS	99	// Окончательная обработка данных КМПГ
 
 
 #define DT_NS_FID_ORG		0x5A	// исходный сигнал шума ССИ (uint16_t) (2^19 of Galois)
@@ -347,13 +351,13 @@ typedef struct Processing_Params
 
 	float zero_level; 			// "уровень нуля" для оцифрованных данных АЦП (должно быть около 2048)
 
-	int points_count; 			// количество оцифрованных "точек" (двухбайтных) в массиве данных, принятом по каналу UPP
+	//int points_count; 			// количество оцифрованных "точек" (двухбайтных) в массиве данных, принятом по каналу UPP
 
-	int current_echo; 			// номер текущего эхо в последователньости Карра-Парселла
-	int echo_count; 			// количество принятых эхо
+	//int current_echo; 			// номер текущего эхо в последователньости Карра-Парселла
+	//int echo_count; 			// количество принятых эхо
 
-	int group_index;			// "групповой индекс" - номер текущей группы эхо (используется для различения, например, данных из разных последовательностей Карра-Парселла, измеренных в одном цикле измерений)
-	int channel_id;				// номер канала данных
+	//int group_index;			// "групповой индекс" - номер текущей группы эхо (используется для различения, например, данных из разных последовательностей Карра-Парселла, измеренных в одном цикле измерений)
+	//int channel_id;				// номер канала данных
 
 	uint8_t tag; 				// unused field
 } Processing_Params;
@@ -383,9 +387,9 @@ void fill_ByValue(STACKPtrF *stack, int src_len, uint8_t byte);
 void cast_UPPDataToFID_U16(uint8_t *src, int src_len, uint16_t *dst);
 void cast_UPPDataToSE_U16(uint8_t *src, int src_len, uint16_t *dst);
 void cast_UPPDataToFID(uint8_t *src, int src_len, float *dst);
-void cast_UPPDataToFID2(uint8_t *src, Processing_Params *proc_params, float *dst);
+void cast_UPPDataToFID2(uint8_t *src, int src_len, float *dst);
 void cast_UPPDataToSE(uint8_t *src, int src_len, float *dst);
-void cast_UPPDataToSE2(uint8_t *src, Processing_Params *proc_params, float *dst);
+void cast_UPPDataToSE2(uint8_t *src, int src_len, float *dst);
 void copy_DataTo(STACKPtrF *stack, int src_len, float *dst);
 void move_FromStack(STACKPtrF *stack, int src_len, float *dst);
 void define_ZeroLevel(float *src, int src_len, Processing_Params *proc_params);
@@ -399,16 +403,14 @@ void do_MathOperationVal(STACKPtrF *stack, int src_len,  SummationBuffer *sum_bu
 void do_MathOperationBin(STACKPtrF *stack, int src_len, Data_Cmd *instr);
 void do_MathOperationXX(SummationBuffer *sum_buff, Data_Cmd *instr);
 void add_ValueToXX(SummationBuffer *sum_buff, Data_Cmd *instr);
-void accumulate_Data(STACKPtrF *stack, int src_len, Processing_Params *proc_params);
-void accsmooth_Data(STACKPtrF *stack, int src_len, Processing_Params *proc_params, Data_Cmd *instr);
-Bool decimateDataInOutputbuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Params *proc_params, Data_Cmd *instr);
+void accumulate_Data(STACKPtrF *stack, int src_len, int N);
+void accsmooth_Data(STACKPtrF *stack, int src_len, int N, Data_Cmd *instr);
+Bool decimateDataInOutputbuffer(STACKPtrF *stack, OutBuffer *out_buff, int src_len, uint8_t channel_id, Data_Cmd *instr);
 Bool summarize_Data(STACKPtrF *stack, int src_len, SummationBuffer *sum_buff, Data_Cmd *instr);
-Bool summarize_DataForRelax(STACKPtrF *stack, int src_len, SummationBuffer *sum_buff, Processing_Params *proc_params, Data_Cmd *instr);
 Bool average_Data(STACKPtrF *stack, int src_len, SummationBuffer *sum_buff, Data_Cmd *instr);
-//Bool move_ToNMRBuffer(STACKPtrF *stack, int src_len, float *dst, int *dst_len, Processing_Params *proc_params, Data_Cmd *instr);
-Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Params *proc_params, uint8_t data_type);
-Bool move_AccToOutputBuffer(STACKPtrF *stack, SummationBuffer *sum_buff, OutBuffer *out_buff, Processing_Params *proc_params);
-Bool move_XXToOutBuffer(SummationBuffer *sum_buff, OutBuffer *out_buff, Processing_Params *proc_params, Data_Cmd *instr);
+Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, int src_len, uint8_t channel_id, uint8_t data_type);
+Bool move_AccToOutputBuffer(STACKPtrF *stack, SummationBuffer *sum_buff, OutBuffer *out_buff, uint8_t channel_id);
+Bool move_XXToOutBuffer(SummationBuffer *sum_buff, OutBuffer *out_buff, uint8_t channel_id, Data_Cmd *instr);
 Bool write_ValueToSummationBuffer(SummationBuffer *sum_buff, Data_Cmd *instr);
 
 

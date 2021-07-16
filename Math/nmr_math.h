@@ -357,23 +357,17 @@ void tw_gen(float *w, int n);
 void init_fft_data (float *x, int n, int pad);
 void setWinFuncParams(int x0, int sigma, int func_id, uint8_t step_id, Processing_Params *params);
 void setWinFuncParamsPro(Data_Cmd *instr, uint8_t step_id, Processing_Params *params);
-void applyWinFunc(float *src, float *dst, int N, Processing_Params *params, int step_id);
+void applyWinFunc(float *src, float *dst, int N, /*int points_count,*/ Processing_Params *params, int step_id);
 void doQuadDetect(float *src, float *dst, int from, int to);
-void emulate_EchoData(uint8_t *dst, Processing_Params *proc_params);
-void emulate_FIDData(uint8_t *dst, Processing_Params *proc_params);
-void emulate_NoiseData(uint8_t *dst, Processing_Params *proc_params);
-void emulate_FIDNoiseData(Data_Cmd *instr, uint8_t *dst, Processing_Params *proc_params);
-void emulate_EchoNoiseData(Data_Cmd *instr, uint8_t *dst, Processing_Params *proc_params);
+void emulate_EchoData(uint8_t *dst, int32_t data_len, int32_t echo_number, float sn_ratio);
+void emulate_FIDData(uint8_t *dst, int src_len);
+void emulate_NoiseData(uint8_t *dst, int src_len);
+void emulate_FIDNoiseData(Data_Cmd *instr, uint8_t *dst, int len);
+void emulate_EchoNoiseData(Data_Cmd *instr, uint8_t *dst, int index, int len);
 
-void clearDataHeap(float **hx_bank, int *hx_len, Data_Cmd *instr);
-void noiseUppDataPreprocessing1(uint8_t *upp_data, float **data_bank, float **hx_bank, int *hx_len, Processing_Params *proc_params, Data_Cmd *instr);
-void signalUppDataPreprocessing1(uint8_t *upp_data, float **data_bank, float **hx_bank, Processing_Params *proc_params, Data_Cmd *instr);
-void signal_noise_UppDataPreprocessing3(uint8_t *upp_data, float **data_bank, float **hx_bank, int *hx_len, Processing_Params *proc_params, Data_Cmd *instr);
-void noiseProcessing2(float **data_bank, float **hx_bank, int rad, Data_Cmd *instr, Processing_Params *proc_params, OutBuffer *out_buff);
-void signalProcessing2(float **data_bank, float **hx_bank, int rad, Data_Cmd *instr, Processing_Params *proc_params, SummationBuffer *sum_buff, OutBuffer *out_buff);
-void signalProcessing3(float **data_bank, float **hx_bank, int rad, Data_Cmd *instr, Processing_Params *proc_params, SummationBuffer *sum_buff, OutBuffer *out_buff);
-void noiseProcessing1(uint8_t *upp_data, float **data_bank, int rad, Data_Cmd *instr, Processing_Params *proc_params, OutBuffer *out_buff);
-void signalProcessing1(uint8_t *upp_data, float **data_bank, int rad, Data_Cmd *instr, Processing_Params *proc_params, SummationBuffer *sum_buff, OutBuffer *out_buff);
+//void signalProcessing3(float **data_bank, float **hx_bank, int rad, Data_Cmd *instr, Processing_Params *proc_params, SummationBuffer *sum_buff, OutBuffer *out_buff);
 
+void data_preprocessing_kpmg(DataSample *data_sample, DataHeap *data_heap_sample, float *temp_data_ptr, Data_Cmd *instr);
+void data_processing_kpmg(DataSample *ds, DataHeap **data_heap_samples, Data_Cmd *instr, float **data_bank, int rad, Processing_Params *proc_params, OutBuffer *out_buff);
 
 #endif /* NMR_MATH_H_ */

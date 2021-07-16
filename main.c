@@ -106,13 +106,23 @@ void pressureUnitDataToOutput(OutBuffer *out_buff);
 //void extractDataFromPacks(UART_Message *uart_msg, uint8_t *arr, uint16_t *len);
 void generateTestEchoData(int index, int count);
 Bool extractDataFromPacks(UART_Message *uart_msg, uint8_t *arr, uint16_t *len);
-void executeProcPack(Data_Proc *proc, int index);
+void executeProcPack(Data_Proc *proc, DataSample *ds);
 void toMeasureTemperatures();
 void setDefaultCommSettings();
+
+void clearDataSamples();
+void clearDataHeap();
 
 //void initDataSamples(DataSample **d_samples, int count);
 //-----------------------------------------------------------------------------
 
+/*
+volatile int runExample, counter = 0;
+volatile int times[1000];
+volatile uint64_t tsch;
+volatile uint64_t tscl;
+volatile uint64_t time_shift;
+*/
 
 //upp vars and functions -------------------------------------------------------
 volatile unsigned int reg1 = 0, reg2 = 0, reg3 = 0;
@@ -194,17 +204,22 @@ float *bank[10]; 											// = { ptr_data_org, ptr_data1, ptr_data2, ptr_data3
 
 volatile uint32_t processed_data_sample;					// номер последнего обработанного эхо в samples_buffer
 volatile uint32_t current_data_sample;						// текущий элемент в data_samples (счетчик готовых, но еще необработанных данных)
+#define SAMPLES_BUFFER_SIZE			(0x800000)
+uint8_t *samples_buffer;									// буфер данных АЦП для их последующей обработки. Массив объектов, содержащий полученные из АЦП данные и описание к ним типа DataSample.
+															// Длина эхо может быть разная - поэтому заранее не известно, сколько можно разместить эхо в области памяти samples_buffer.
+															// При достижении предела выделенной под samples_buffer памяти, новые эхо записываться не будут
+volatile uint32_t samples_buffer_pos;						// указатель на текущую позицию в samples_buffer
 DataSample **data_samples;									// массив объектов, содержащий указатели на полученные из АЦП данные (в samples_buffer) и описание к этим данным (см. DataSample).
 															// Длина эхо может быть разная - поэтому заранее не известно, сколько можно разместить эхо в области памяти samples_buffer. Под объекты DataSample памяти выделено с некоторым избытком.
 
 volatile int ds_new_data_enabled = 0;						// 0 - новые данные еще не поступили; 1 - данные поступили и записаны в data_samples
 volatile int ds_proc_data_index = 0;						// номер обрабатываемых в данный момент данных в буфере data_samples
-volatile int seq_completed = -1; 							// 1 = последовательность завершилась; 0 = не завершилась; -1 = неопределенное состояние
 volatile int nmr_data_ready = 0;							// 1 = прием всех эхо ЯМР завершился (можно приступить к обработке); 0 = прием данных ЯМР (эхо) не завершился или измерений ЯМР не производится
 
+DataHeap **data_heap_samples;								// Контейнер для предобработанных данных (эхо)
+//float **data_heap; 											// контейнер долгосрочного хранения данных (расположен в куче)
+//int data_heap_len[DATA_HEAP_COUNT]; 						// массив длин данных, хранящихся в массивах контейнера data_heap
 
-float **data_heap; 											// контейнер долгосрочного хранения данных (расположен в куче)
-int data_heap_len[DATA_HEAP_COUNT]; 						// массив длин данных, хранящихся в массивах контейнера data_heap
 
 int rad; 													// параметр, используемый для БПФ
 
@@ -344,7 +359,7 @@ void main(void)
 	//_enable_interrupts(); // ??? should be _disable_interrupts(); I think??? (aivanov)
 
 	// Timer initialization ---------------------------------------------------
-	timerSettings.freq = 24000u;
+	timerSettings.freq = 240000u;
 	timerSettings.enabled = False;
 
 	tmrRegs = tmr0Regs; 									// add Timer0 to application
@@ -457,7 +472,7 @@ void main(void)
 
 	// Enable devices ---------------------------------------------------------
 	timerSettings.enabled = True;
-	enable_Timer(tmrRegs);														printf("System timer was enabled.\n");
+	disable_Timer(tmrRegs);														printf("System timer was disabled.\n");
 
 	enable_UART(uartRegs);														printf("UART1 for the cable communication was enabled.\n");
 
@@ -465,27 +480,6 @@ void main(void)
 	memset(telemetric_data, 0x00, TELEMETRIC_UART_BUF_LEN);
 	enable_UART(uartRegs_Telemetric); 											printf("UART2 for the Telemetric board was enabled.\n"); // start operations on Telemetric UART
 #endif
-	// ------------------------------------------------------------------------
-
-	/*
-	// GPIO
-	PSCModuleControl(SOC_PSC_1_REGS, HW_PSC_GPIO, PSC_POWERDOMAIN_ALWAYS_ON,
-			PSC_MDCTL_NEXT_ENABLE); 						// initialization of GPIO support in PSC module
-	GPIOBank0Pin1PinMuxSetup();								// Pin Multiplexing of pin 1 of GPIO Bank 0 (ADC echo window)
-	GPIOBank0Pin2PinMuxSetup();								// Pin Multiplexing of pin 2 of GPIO Bank 0
-	GPIOBank0Pin3PinMuxSetup();								// Pin Multiplexing of pin 3 of GPIO Bank 0 (RF sequence)
-	GPIODirModeSet(SOC_GPIO_0_REGS, 2, GPIO_DIR_INPUT);		// Sets the pin 1( GP0[1] )
-	GPIODirModeSet(SOC_GPIO_0_REGS, 3, GPIO_DIR_INPUT);		// Sets the pin 2( GP0[2] )
-	GPIODirModeSet(SOC_GPIO_0_REGS, 4, GPIO_DIR_INPUT);		// Sets the pin 3( GP0[3] )
-	*/
-	// ------------------------------------------------------------------------
-
-	// init device settings ---------------------------------------------------
-	//proger_stop();
-	//device_serial = proger_rd_device_serial();
-	//initDeviceSettings(device_serial);
-
-	//main_proger_wr_pulseprog_default();
 	// ------------------------------------------------------------------------
 
 
@@ -569,20 +563,22 @@ void main(void)
 	bank[8] = ptr_temp_data;
 	bank[9] = ptr_w;
 
+	// Initialization of a buffer for raw data (echoes from ADC) --------------------------------------------
+	samples_buffer = (uint8_t*)malloc(SAMPLES_BUFFER_SIZE*sizeof(uint8_t));
+	samples_buffer_pos = 0;
 	data_samples = (DataSample**)calloc(UPP_DATA_COUNT, sizeof(DataSample*));
 	for (i = 0; i < UPP_DATA_COUNT; i++)
 	{
 		DataSample *data_sample = (DataSample*) malloc(sizeof(DataSample));
 
-		uint8_t *data_ptr = (uint8_t*)calloc(UPP_BUFF_SIZE, sizeof(uint8_t));
-		data_sample->data_ptr = data_ptr;
+		//uint8_t *data_ptr = (uint8_t*)calloc(UPP_BUFF_SIZE, sizeof(uint8_t));
+		//data_sample->data_ptr = data_ptr;
+		data_sample->data_ptr = 0;
 		data_sample->data_len = 0;
 		data_sample->echo_number = 0;
 		data_sample->proc_id = 0;
 		data_sample->tool_id = 0;
 		data_sample->channel_id = 0;
-		//data_sample->heap_ptr = data_heap[i];
-		//data_sample->heap_len = 0;
 		data_sample->tag = 0;
 
 		data_samples[i] = data_sample;
@@ -590,13 +586,21 @@ void main(void)
 	current_data_sample = 0;
 	ds_new_data_enabled = 0;
 	processed_data_sample = 0;
+	// ------------------------------------------------------------------------------------------------------
 
-	data_heap = (float**) calloc(DATA_HEAP_COUNT, sizeof(float*));
+	// Initialization of a container ("heap") for preprocessed data
+	data_heap_samples = (DataHeap**)calloc(DATA_HEAP_COUNT, sizeof(DataHeap*));
 	for (i = 0; i < DATA_HEAP_COUNT; i++)
 	{
+		DataHeap *data_heap = (DataHeap*)malloc(sizeof(DataHeap));
+
 		float *heap_arr = (float*) calloc(DATA_MAX_LEN, sizeof(float));
-		data_heap[i] = heap_arr;
-		data_heap_len[i] = 0;
+		data_heap->data_ptr = heap_arr;
+		data_heap->data_len = 0;
+		data_heap->echo_number = 0;
+		data_heap->tag = 0;
+
+		data_heap_samples[i] = data_heap;
 	}
 
 	ptr_data_nmr = data_nmr + PAD;
@@ -633,9 +637,11 @@ void main(void)
 	tw_gen(ptr_w, CMPLX_DATA_MAX_LEN);
 
 	// Compute overhead of calling clock() twice and init TimingData
-	t_start = clock();
-	t_stop = clock();
-	t_overhead = t_stop - t_start;
+	//t_start = clock();
+	//t_stop = clock();
+	//t_overhead = t_stop - t_start;
+	volatile uint32_t tsch = TSCH;
+	volatile uint32_t tscl = TSCL;
 
 
 	upp_start(byte_count, line_count, upp_buffer);
@@ -648,7 +654,6 @@ void main(void)
 	press_unit_data = 0;
 #endif
 
-	int upp_counter;
 	volatile int soft_echo_counter = 0;
 	volatile int hard_echo_counter = 0;
 
@@ -664,15 +669,22 @@ void main(void)
 
 	fpga_prg_started = False;
 
+	enable_Timer(tmrRegs);														printf("System timer was enabled.\n");
 
 	// Start main loop --------------------------------------------------------
-	int proc_samples[100];
-	int samples_counter = 0;
-	memset(&proc_samples[0], 0x00, 100*sizeof(int));
 	printf("Start!\n");
-	//P15_CLR();
+
+	//int proc_samples[20];
+	//int samples_counter = 0;
+	//memset(&proc_samples[0], 0x00, 100*sizeof(int));
 	tmpb = 0;
-	//volatile int ready_msg_sent = 0;
+
+	/*TSCL = 0;
+	TSCH = 0;
+	tsch = TSCH;
+	tscl = TSCL;
+	time_shift = (tsch << 32) | tscl;*/
+
 	while (app_finish == 0)
 	{
 		if (ds_new_data_enabled == 1)
@@ -680,26 +692,24 @@ void main(void)
 			setupDDR2Cache();
 			enableCacheL1();
 
-			ds_proc_data_index = current_data_sample;
-			int data_samples_count = ds_proc_data_index - processed_data_sample;
+			ds_proc_data_index = current_data_sample;									// номер текущеих пришедших данных (для ЯМР - это номер текущего эхо)
+			int data_samples_count = ds_proc_data_index - processed_data_sample;		// кол-во новых пришедших и еще не обработанных данных (для ЯМР - это кол-во эхо)
 			for (i = 0; i < data_samples_count; i++)
 			{
 				DataSample *ds = data_samples[i+processed_data_sample];					// забрать свежие данные
 				move_ToFirstDataProcCmd(ds->proc_id-1, instr_prg);
-				//executeProcPack(instr_prg, ds->proc_id-1);
+				executeProcPack(instr_prg, ds);
 				processed_data_sample++;
+
+				//proc_samples[samples_counter] = processed_data_sample;
 			}
 			ds_new_data_enabled = 0;
 
 			disableCache();
 		}
 
-		/*if (tool_state != UNKNOWN_STATE)*/ //tool_state = defineToolState();
-
 		if (tool_state == READY) // прибор готов к приему/передаче данных по кабелю (получен сигнал GP0[3] "up")
 		{
-//			launch_counter++;
-
 			//_disable_interrupts();		// commented 12.10.2020
 			QUEUE8_clear(uart_queue);
 			QUEUE8_clear(head_q);
@@ -715,24 +725,21 @@ void main(void)
 			//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 			//memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
 
-			//printf("Echoes were recieved: %i\n", /*processed_data_sample*/ processed_data_sample);
+			//processed_data_sample = 0;
+			//ds_proc_data_index = 0;
 
 			/*
-			if (samples_counter < 100)
+			samples_counter++;
+			if (samples_counter == 20)
 			{
-				proc_samples[samples_counter] = processed_data_sample;
-				samples_counter++;
-			}
-			else
-			{
-				for (i = 0; i < 100; i++) printf("Echoes were recieved: %i\n", proc_samples[i]);
+				for (i = 0; i < 20; i++)
+				{
+					printf("Echoes were preprocessed: %i\n", proc_samples[i]);
+					proc_samples[i] = 0;
+				}
 				samples_counter = 0;
-				memset(&proc_samples[0], 0x00, 100*sizeof(int));
 			}
 			*/
-
-			processed_data_sample = 0;
-			ds_proc_data_index = 0;
 
 #ifdef USE_TELEMETRIC_UART
 			if (telemetry_ready == TELE_NOT_READY)
@@ -785,6 +792,9 @@ void main(void)
 			SummationBuffer_ClearAll(summ_data);
 			OutBuffer_ClearAll(output_data);
 
+			clearDataSamples();
+			clearDataHeap();
+
 			soft_echo_counter = 0;
 			error_echo_counter = 0;
 			tool_state = BUSY;
@@ -792,7 +802,6 @@ void main(void)
 
 			sendByteArray(&NMRTool_NotReady[0], SRV_MSG_LEN + 2, uartRegs);
 
-			upp_counter = 0;
 			//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 			memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
 			upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
@@ -804,160 +813,10 @@ void main(void)
 			}
 		}
 
-/*		if (tool_state == BUSY) // прибор не доступен для приема/передачи данных по кабелю (находится в состоянии приема и обработки данных ЯМР, GP0[3] = "down")
+		if (tool_state == BUSY) // прибор не доступен для приема/передачи данных по кабелю (находится в состоянии приема и обработки данных ЯМР, GP0[3] = "down")
 		{
-			uppFull = False;
 
-			if (stb[1] == STB_FALLING_EDGE && pins_cmd == SDSP_TOOL)
-			{
-				device_id = SDSP_TOOL;
-				int channel_data_id = proger_rd_ch_number();
-				processing_params->channel_id = channel_data_id;
-			}
-			if (stb[1] == STB_RISING_EDGE && device_id == SDSP_TOOL)
-			{
-				setupDDR2Cache();
-				enableCacheL1();
-
-				int proc_index = pins_cmd;
-				if (proc_index < MAX_PROCS)
-				{
-					move_ToFirstDataProcCmd(proc_index - 1, instr_prg);
-					executeProcPack(instr_prg, proc_index - 1);
-				}
-
-				device_id = 0; // No device
-				disableCache();
-			}
-			// *********************************************************
-
-			// ******************** NMR Tool... ************************
-			//if (pin1_state == GPIO_FALL_STATE && cmd_addr == 0xFE)
-			if (stb[1] == STB_FALLING_EDGE && pins_cmd == NMR_TOOL)
-			{
-				device_id = NMR_TOOL;
-				int channel_data_id = proger_rd_ch_number();
-				processing_params->channel_id = channel_data_id;
-			}
-			//else if (pin1_state == GPIO_RISE_STATE && device_id == NMR_TOOL && cmd_addr != 0x00)
-			if (stb[1] == STB_RISING_EDGE && device_id == NMR_TOOL && pins_cmd != 0x00)
-			{
-				upp_resetted = upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
-				if (upp_resetted == FALSE)
-				{
-					upp_resetted = TRUE;
-				}
-
-				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
-
-				//t_start = clock();
-				//t_stop = clock();
-				//t_overhead = t_stop - t_start;
-				//t_start = clock();
-
-				setupDDR2Cache();
-				enableCacheL1();
-#ifndef USE_TIMING
-				dummyDelay(2);
-				hard_echo_counter = proger_rd_echo_count();
-#endif
-				recievied_adc_points_count = proger_rd_adc_points_count();
-				upp_counter++;
-				soft_echo_counter++;
-
-				//soft_arr[soft_echo_counter - 1] = soft_echo_counter;
-				//hard_arr[soft_echo_counter - 1] = hard_echo_counter;
-				//if (soft_echo_counter != hard_echo_counter) error_echo_counter++;
-
-				processing_params->current_echo = hard_echo_counter;
-				processing_params->points_count = recievied_adc_points_count;
-				processing_params->echo_count = soft_echo_counter; // это неверно, т.к. счетчик soft_echo_counter не обнуляется между спадами
-
-				//int group_index = proger_rd_group_index();
-				//processing_params->group_index = group_index;
-
-				//setupDDR2Cache();
-				//enableCacheL1();
-
-				int proc_index = pins_cmd;
-				if (proc_index <= MAX_PROCS)
-				{
-					move_ToFirstDataProcCmd(proc_index - 1, instr_prg);
-					executeProcPack(instr_prg, proc_index - 1);
-				}
-				device_id = 0; // No device
-
-				memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
-				disableCache();
-
-//#3			upp_resetted = upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
-				if (upp_resetted == FALSE)
-				{
-					upp_resetted = TRUE;
-				}
-
-				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
-				//dummyDelay(2);			// delay 50 mks
-
-				//t_stop = clock();
-				//printf("\t NMR data processing time: %d clock cycles\n", (t_stop - t_start) - t_overhead);
-			}
-
-			// ******************** GAMMA Tool... ************************
-			if (stb[1] == STB_FALLING_EDGE && pins_cmd == GAMMA_TOOL)
-			{
-				device_id = GAMMA_TOOL;
-				int channel_data_id = proger_rd_ch_number();
-				processing_params->channel_id = channel_data_id;
-			}
-			if (stb[1] == STB_RISING_EDGE && device_id == GAMMA_TOOL && pins_cmd != 0x00)
-			{
-				setupDDR2Cache();
-				enableCacheL1();
-
-				int proc_index = pins_cmd;
-				if (proc_index < MAX_PROCS)
-				{
-					move_ToFirstDataProcCmd(proc_index - 1, instr_prg);
-					executeProcPack(instr_prg, proc_index - 1);
-				}
-
-				device_id = 0; // No device
-				disableCache();
-			}
-
-			// ******************** DUMMY Tool... ************************
-			//if (pin1_state == GPIO_FALL_STATE && cmd_addr == DUMMY_TOOL)	//cmd_addr 0xC8 - фиктивное устройство
-			if (stb[1] == STB_FALLING_EDGE && pins_cmd == DUMMY_TOOL)
-			{
-				device_id = DUMMY_TOOL;
-				int channel_data_id = proger_rd_ch_number();
-				processing_params->channel_id = channel_data_id;
-			}
-			//if (pin1_state == GPIO_RISE_STATE && device_id == DUMMY_TOOL && cmd_addr != 0x00)//
-			if (stb[1] == STB_RISING_EDGE && device_id == DUMMY_TOOL && pins_cmd != 0x00)
-			{
-				setupDDR2Cache();
-				enableCacheL1();
-
-				//int proc_index = cmd_addr;
-				int proc_index = pins_cmd;
-				if (proc_index < MAX_PROCS)
-				{
-					move_ToFirstDataProcCmd(proc_index - 1, instr_prg);
-					executeProcPack(instr_prg, proc_index - 1);
-				}
-
-				device_id = 0; // No device
-				disableCache();
-			}
-
-			if (timerSettings.enabled == True)
-			{
-				timerSettings.enabled = False;
-				disable_Timer(tmrRegs);
-			}
-		}*/
+		}
 
 		if (tool_state == FREE) // прибор находится в состоянии приема/передачи данных по кабелю (GP0[3] = "up")
 		{
@@ -987,7 +846,6 @@ void main(void)
 				//_disable_interrupts();			// commented 12.10.2020
 				QUEUE8_clear(uart_queue);
 				QUEUE8_clear(head_q);
-				//QUEUE8_clear(body_q);
 				BUFFER8_clear(body_q);
 				//_enable_interrupts();				// commented 12.10.2020
 
@@ -1005,7 +863,6 @@ void main(void)
 				//_disable_interrupts();			// commented 12.10.2020
 				QUEUE8_clear(uart_queue);
 				QUEUE8_clear(head_q);
-				//QUEUE8_clear(body_q);
 				BUFFER8_clear(body_q);
 				//_enable_interrupts();				// commented 12.10.2020
 
@@ -1021,7 +878,6 @@ void main(void)
 				//_disable_interrupts();			// commented 12.10.2020
 				QUEUE8_clear(uart_queue);
 				QUEUE8_clear(head_q);
-				//QUEUE8_clear(body_q);
 				BUFFER8_clear(body_q);
 				//_enable_interrupts();				// commented 12.10.2020
 
@@ -1063,7 +919,6 @@ void main(void)
 			clearMsgHeader(in_msg_header);
 			QUEUE8_clear(uart_queue);
 			QUEUE8_clear(head_q);
-			//QUEUE8_clear(body_q);
 			BUFFER8_clear(body_q);
 			msg_header_state = NOT_DEFINED;
 			incom_msg_state = NOT_DEFINED;
@@ -1227,7 +1082,7 @@ void onDataAvailable(QUEUE8* bytes)
 
 			if (incom_msg_state == PACKS_FINISHED)
 			{
-				//stopClocker(clocker2);
+				stopClocker(clocker2);
 
 				// Enable DDR cache
 				setupDDR2Cache();
@@ -1467,7 +1322,8 @@ void executeShortMsg(MsgHeader *_msg_header)
 		stopClocker(clocker3);
 		stopClocker(clocker4);	// added 16.08.2017
 		incom_msg_state = NOT_DEFINED;
-		//tool_state = FREE; 	// commented 16.03.2016
+		tool_state = FREE; 	// commented 16.03.2016
+
 		//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 		//upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
 
@@ -1503,6 +1359,8 @@ void executeShortMsg(MsgHeader *_msg_header)
 		startClocker(clocker3);
 		startClocker(clocker4);		// added 16.08.2017
 		incom_msg_state = NOT_DEFINED;
+
+		tool_state = FREE;
 
 		break;
 	}
@@ -2025,9 +1883,22 @@ interrupt void TIMER0_12_isr(void)
 				clockers[i]->counts = 0;
 				clockers[i]->tag++;
 			}
-			else clockers[i]->counts++;
+			else clockers[i]->counts += 5;
 		}
 	}
+
+	/*tsch = TSCH;
+	tscl = TSCL;
+	uint64_t cur_tsc = 0;
+	cur_tsc = (((cur_tsc | tsch) << 32) | tscl) - time_shift;
+	times[counter] = (uint32_t)(cur_tsc / 300);
+
+	counter++;
+	if(counter == 999)
+	{
+		counter = 0;
+		runExample = 0;
+	}*/
 }
 
 interrupt void UART_isr(void)
@@ -2152,29 +2023,28 @@ interrupt void GPIO_isr(void)
 				int upp_data_len = proger_rd_adc_points_count();
 				int upp_echo_number = proger_rd_echo_count();
 
-				if (current_data_sample < (UPP_DATA_COUNT - 1) )
+				if (current_data_sample < (DATA_HEAP_COUNT - 1) )
 				{
 					data_samples[current_data_sample]->tool_id = device_id;
 					data_samples[current_data_sample]->channel_id = channel_id;
 					data_samples[current_data_sample]->data_len = upp_data_len;
 					data_samples[current_data_sample]->echo_number = upp_echo_number;
 					data_samples[current_data_sample]->proc_id = pins_cmd;
-					//data_samples[current_data_sample]->data_ptr = samples_buffer + samples_buffer_pos;
-					//samples_buffer_pos += upp_data_len;
+					data_samples[current_data_sample]->data_ptr = samples_buffer + samples_buffer_pos;
+					samples_buffer_pos += upp_data_len;
 
 					setupDDR2Cache();
 					enableCacheL1();
 					memcpy(data_samples[current_data_sample]->data_ptr, upp_buffer, upp_data_len*sizeof(uint8_t));
 					disableCache();
 
-					processing_params->channel_id = channel_id;
-					processing_params->current_echo = upp_echo_number;
-					processing_params->points_count = upp_data_len;
+					//processing_params->channel_id = channel_id;
+					//processing_params->current_echo = upp_echo_number;
+					//processing_params->points_count = upp_data_len;
 
 					current_data_sample++;
 				}
 
-				seq_completed = 0;			// последовательность еще не законченна
 				ds_new_data_enabled = 1;	// поступили новые данные
 
 				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
@@ -2183,17 +2053,17 @@ interrupt void GPIO_isr(void)
 			}
 			case DUMMY_TOOL:
 			{
-				/* Temporary !!!
-				//processing_params->proc_cmd = pins_cmd;
+				ds_new_data_enabled = 0;
+
 				data_samples[current_data_sample]->tool_id = device_id;
 				data_samples[current_data_sample]->channel_id = channel_id;
 				data_samples[current_data_sample]->data_len = 0;
 				data_samples[current_data_sample]->echo_number = 0;
 				data_samples[current_data_sample]->proc_id = pins_cmd;
 				data_samples[current_data_sample]->data_ptr = NULL;
-				*/
 
-				//seq_completed = 1;			// можно приступить к обработке данных NMR
+				current_data_sample++;
+				ds_new_data_enabled = 1;	// поступили новые данные
 
 				break;
 			}
@@ -2203,7 +2073,7 @@ interrupt void GPIO_isr(void)
 				if (proc_index < MAX_PROCS)
 				{
 					move_ToFirstDataProcCmd(proc_index - 1, instr_prg);
-					executeProcPack(instr_prg, proc_index - 1);
+					//executeProcPack(instr_prg, proc_index - 1);
 				}
 
 				device_id = 0; 				// No device
@@ -2237,14 +2107,14 @@ interrupt void GPIO_isr(void)
 		if (pin3_state == 1)
 		{
 			tool_state = READY;
-			seq_completed = 1; //перенесено выше. Теперь признаком завершения последовательности является приход DUMMY_TOOL - можно приступить обрабатывать данные
 			//printf("Number of last obtained echo: %i\n", current_data_sample);
 		}
 		else if (pin3_state == 0)
 		{
+
 			current_data_sample = 0;
 			processed_data_sample = 0;
-			seq_completed = 0;
+			samples_buffer_pos = 0;
 
 			tool_state = NOT_READY;
 		}
@@ -3143,11 +3013,12 @@ Bool extractDataFromPacks(UART_Message *uart_msg, uint8_t *arr, uint16_t *len)
 	return True;
 }
 
-void executeProcPack(Data_Proc *proc, int index)
+void executeProcPack(Data_Proc *proc, DataSample *ds)
 {
 	//Data_Cmd *instr = (Data_Cmd*) malloc(sizeof(Data_Cmd));
 	//init_DataProcCmd(instr);
 
+	uint8_t index = ds->proc_id-1;								// номер пакета обработки данных
 	if (proc->proc_lens[index] <= 0) //return;					// если в пакете инструкций не было найдено инструкций, то выход
 	{
 		return;
@@ -3157,140 +3028,9 @@ void executeProcPack(Data_Proc *proc, int index)
 	{
 		switch (instr->cmd)
 		{
-		case INS_WR_D0_ST:	STACKPtrF_push(ptr_data_org, data_stack);	break;
-		case INS_WR_D1_ST:	STACKPtrF_push(ptr_data1, data_stack);	break;
-		case INS_WR_D2_ST:	STACKPtrF_push(ptr_data2, data_stack);	break;
-		case INS_WR_D3_ST:	STACKPtrF_push(ptr_data3, data_stack);	break;
-		case INS_WR_DX_ST:
-		{
-			if (instr->count < 1) return;
-			int indexX = (int) instr->params[0];
-
-			switch (indexX)
-			{
-			case 0:	STACKPtrF_push(ptr_data_org, data_stack);	break;
-			case 1:	STACKPtrF_push(ptr_data1, data_stack);	break;
-			case 2:	STACKPtrF_push(ptr_data2, data_stack);	break;
-			case 3:	STACKPtrF_push(ptr_data3, data_stack);	break;
-			case 4:	STACKPtrF_push(ptr_data4, data_stack);	break;
-			case 5:	STACKPtrF_push(ptr_data5, data_stack);	break;
-			case 6:	STACKPtrF_push(ptr_data6, data_stack);	break;
-			case 7:	STACKPtrF_push(ptr_data7, data_stack);	break;
-			default: break;
-			}
-			break;
-		}
-		case INS_WR_HX_ST:
-		{
-			if (instr->count < 1) return;
-			int indexX = (int) instr->params[0];
-			STACKPtrF_push(data_heap[indexX], data_stack);
-			break;
-		}
-		case INS_CP_ST_D0:	copy_DataTo(data_stack, DATA_MAX_LEN, ptr_data_org);	break;
-		case INS_CP_ST_D1:	copy_DataTo(data_stack, DATA_MAX_LEN, ptr_data1);	break;
-		case INS_CP_ST_D2:	copy_DataTo(data_stack, DATA_MAX_LEN, ptr_data2);	break;
-		case INS_CP_ST_D3:	copy_DataTo(data_stack, DATA_MAX_LEN, ptr_data3);	break;
-		case INS_CP_ST_DX:
-		{
-			if (instr->count < 1) return;
-			int indexX = (int) instr->params[0];
-
-			float *dst = 0;
-			switch (indexX)
-			{
-			case 0:	dst = ptr_data_org;	break;
-			case 1:	dst = ptr_data1;	break;
-			case 2:	dst = ptr_data2;	break;
-			case 3:	dst = ptr_data3;	break;
-			case 4:	dst = ptr_data4;	break;
-			case 5:	dst = ptr_data5;	break;
-			case 6:	dst = ptr_data6;	break;
-			case 7:	dst = ptr_data7;	break;
-			default: break;
-			}
-
-			copy_DataTo(data_stack, DATA_MAX_LEN, dst);
-			break;
-		}
-		case INS_CP_ST_HX:
-		{
-			if (instr->count < 1) return;
-			int indexX = (int) instr->params[0];
-			copy_DataTo(data_stack, DATA_MAX_LEN, data_heap[indexX]);
-			break;
-		}
-		case INS_MV_ST_D0:	move_FromStack(data_stack, DATA_MAX_LEN, ptr_data_org);	break;
-		case INS_MV_ST_D1:	move_FromStack(data_stack, DATA_MAX_LEN, ptr_data1);	break;
-		case INS_MV_ST_D2:	move_FromStack(data_stack, DATA_MAX_LEN, ptr_data2);	break;
-		case INS_MV_ST_D3:	move_FromStack(data_stack, DATA_MAX_LEN, ptr_data3);	break;
-		case INS_MV_ST_DX:
-		{
-			if (instr->count < 1) return;
-			int indexX = (int) instr->params[0];
-
-			float *dst = 0;
-			switch (indexX)
-			{
-			case 0:	dst = ptr_data_org;	break;
-			case 1:	dst = ptr_data1;	break;
-			case 2:	dst = ptr_data2;	break;
-			case 3:	dst = ptr_data3;	break;
-			case 4:	dst = ptr_data4;	break;
-			case 5:	dst = ptr_data5;	break;
-			case 6:	dst = ptr_data6;	break;
-			case 7:	dst = ptr_data7;	break;
-			default: break;
-			}
-			move_FromStack(data_stack, DATA_MAX_LEN, dst);
-			break;
-		}
-		case INS_MV_ST_HX:
-		{
-			if (instr->count < 1) return;
-			int indexX = (int) instr->params[0];
-			move_FromStack(data_stack, DATA_MAX_LEN, data_heap[indexX]);
-			break;
-		}
-		case INS_ST_SWAP:		STACKPtrF_swap(data_stack);	break;
-		case INS_EMUL_NS:		emulate_NoiseData(upp_buffer, processing_params);	break;
-		case INS_EMUL_FID:		emulate_FIDData(upp_buffer, processing_params);	break;
-		case INS_EMUL_SE:		emulate_EchoData(upp_buffer, processing_params);	break;
-		case INS_EMUL_FID_NS:	emulate_FIDNoiseData(instr, upp_buffer, processing_params);	break;
-		case INS_EMUL_SE_NS:	emulate_EchoNoiseData(instr, upp_buffer, processing_params);	break;
-		case INS_OPER_FID_ORG:	cast_UPPDataToFID_U16(upp_buffer, processing_params->points_count, ptr_ui16_buffer);	break;
-		case INS_OPER_SE_ORG:	cast_UPPDataToSE_U16(upp_buffer, processing_params->points_count, ptr_ui16_buffer);	break;
-		case INS_OPER_FID:		cast_UPPDataToFID(upp_buffer, processing_params->points_count, ptr_data_org);	break;
-		case INS_OPER_SE:		cast_UPPDataToSE(upp_buffer, processing_params->points_count, ptr_data_org);	break;
-		case INS_OPER_FID_D:	cast_UPPDataToFID2(upp_buffer, processing_params, ptr_data_org);	break;
-		case INS_OPER_SE_D:		cast_UPPDataToSE2(upp_buffer, processing_params, ptr_data_org);	break;
-		case INS_DO_OPER1:		do_MathOperationVal(data_stack, DATA_MAX_LEN, summ_data, instr);	break;
-		case INS_DO_OPER2:		do_MathOperationBin(data_stack, DATA_MAX_LEN, instr);	break;
-		case INS_DO_XX_OPER:	do_MathOperationXX(summ_data, instr);	break;
-		case INS_ADD_TO_XX:		add_ValueToXX(summ_data, instr);	break;
-		case INS_ACC_DAT:		accumulate_Data(data_stack, DATA_MAX_LEN, processing_params);	break;
-		case INS_SMOOTH_DAT:	accsmooth_Data(data_stack, DATA_MAX_LEN, processing_params, instr);	break;
-		case INS_QD_FID:		do_QuadDetect(data_stack);	break;
-		case INS_QD_SE:			do_QuadDetect(data_stack);	break;
 		case INS_WIN_TIME:		setWinFuncParamsPro(instr, TIME_DOMAIN_DATA, processing_params);	break;
 		case INS_WIN_FREQ:		setWinFuncParamsPro(instr, FREQ_DATA, processing_params);	break;
-		case INS_APP_WIN_TIME:	apply_WinFunc(TIME_DOMAIN_DATA, processing_params, data_stack);	break;
-		case INS_APP_WIN_FREQ:	apply_WinFunc(FREQ_DATA, processing_params, data_stack);	break;
-		case INS_FPW:			calc_PowerSpec(data_stack, DATA_MAX_LEN);	break;
-		case INS_FAMPL:			calc_AmplSpec(data_stack, DATA_MAX_LEN);	break;
-		case INS_AMP1:			estimate_SignalAmp1(data_stack, DATA_MAX_LEN);	break;
-		case INS_SPEC_MAX:		estimate_MaxSpectrum1(data_stack, DATA_MAX_LEN / 2, processing_params);	break;
-		case INS_SUM_DAT:		summarize_Data(data_stack, DATA_MAX_LEN / 2, summ_data, instr);	break;
-		case INS_SUM_REL_DAT:	summarize_DataForRelax(data_stack, DATA_MAX_LEN / 2, summ_data, processing_params, instr);	break;
-		case INS_ST_AVER:		average_Data(data_stack, processing_params->points_count, summ_data, instr);	break;
-		case INS_ZERO_ST:		fill_ByValue(data_stack, DATA_MAX_LEN, 0x00);	break;
-		case INS_NAN_ST:		fill_ByValue(data_stack, DATA_MAX_LEN, 0xFF);	break;
-		case INS_CL_ST:			STACKPtrF_clear(data_stack);	break;
-		case INS_WR_XX_SUMBUF:	write_ValueToSummationBuffer(summ_data, instr);	break;
-		case INS_MV_ST_OUTBUF:	move_ToOutputBuffer(data_stack, output_data, processing_params, instr->type);	break;
-		case INS_ACC_TO_OUTBUF:	move_AccToOutputBuffer(data_stack, summ_data, output_data, processing_params);	break;
-		case INS_XX_TO_OUTBUF:	move_XXToOutBuffer(summ_data, output_data, processing_params, instr);	break;
-		case INS_ST_DEC_OUTBUF:	decimateDataInOutputbuffer(data_stack, output_data, processing_params, instr);	break;
+		/*
 		case INS_GET_GAMMA:
 		{
 			uint32_t gamma_counts = proger_rd_gamma_count();
@@ -3312,50 +3052,6 @@ void executeProcPack(Data_Proc *proc, int index)
 			}
 			break;
 		}
-		case INS_FFT:
-		{
-			if (data_stack->cnt < 2) break; 				// в стеке должны быть буффер-приемник данных и источник данных (на вершине стека)
-			float *src = STACKPtrF_pop(data_stack);
-			memcpy(&temp_data[0], src - PAD, UPP_DATA_SIZE);// дублирование данных src, т.к. они разрушаются при выполнении функции DSPF_sp_fftSPxSP(...)
-			float *dst = STACKPtrF_first(data_stack);
-			DSPF_sp_fftSPxSP(CMPLX_DATA_MAX_LEN, ptr_temp_data, ptr_w, dst, brev, rad, 0, CMPLX_DATA_MAX_LEN);
-			break;
-		}
-		case INS_IF_DATA_NUM:
-		{
-			if (instr->count != 2) break;
-			int data_number = (int) instr->params[0];
-			int instr_count = (int) instr->params[1];
-			if (processing_params->current_echo != data_number)
-			{
-				pass_DataProcCmds(index, proc, instr_count);
-			}
-			break;
-		}
-		case INS_WR_X0:
-		{
-			if (instr->count != 1) break;
-			XX[0] = (float) instr->params[0];
-			break;
-		}
-		case INS_WR_X1:
-		{
-			if (instr->count != 1) break;
-			XX[1] = (float) instr->params[0];
-			break;
-		}
-		case INS_WR_X2:
-		{
-			if (instr->count != 1) break;
-			XX[2] = (float) instr->params[0];
-			break;
-		}
-		case INS_WR_X3:
-		{
-			if (instr->count != 1) break;
-			XX[3] = (float) instr->params[0];
-			break;
-		}
 		case INS_WR_ACC_GRIX:
 		{
 			if (instr->count != 1) break;
@@ -3365,108 +3061,10 @@ void executeProcPack(Data_Proc *proc, int index)
 			//output_data->group_index[data_cnt] = (int) instr->params[0];
 			break;
 		}
-		case INS_IF_COND_X0:
-		{
-			if (instr->count != 3) break; 	// инструкция содержит три параметра: число, с которым сравнивается X0, код условия,
-					   	   	   	   	   	   	// количество инструкций, на которое необходимо перейти в случае невыполнения условия
-			float value = instr->params[0];
-			int cond_code = instr->params[1];
-			int instr_count = (int) instr->params[2];
-			Bool res = False;
-			if (cond_code == 0) 		res = (XX[0] == value); // condition code == 0 - "=="
-			else if (cond_code == 1) 	res = (XX[0] > value); // condition code == 1 - ">"
-			else if (cond_code == 2)	res = (XX[0] >= value); // condition code == 2 - ">="
-			else if (cond_code == 3)	res = (XX[0] < value); // condition code == 3 - "<"
-			else if (cond_code == 4)	res = (XX[0] <= value); // condition code == 4 - "<="
-			else if (cond_code == 5)	res = (XX[0] != value); // condition code == 5 - "<>"
-			if (res == False)
-			{
-				pass_DataProcCmds(index, proc, instr_count);
-			}
-			break;
-		}
-		case INS_IF_COND_X1:
-		{
-			if (instr->count != 3) break;  // инструкция содержит три параметра: число, с которым сравнивается X1, код условия,
-					   	   	   	   	   	   // количество инструкций, на которое необходимо перейти в случае невыполнения условия
-			float value = instr->params[0];
-			int cond_code = instr->params[1];
-			int instr_count = (int) instr->params[2];
-			Bool res = False;
-			if (cond_code == 0)			res = (XX[1] == value); // condition code == 0 - "=="
-			else if (cond_code == 1)	res = (XX[1] > value); // condition code == 1 - ">"
-			else if (cond_code == 2)	res = (XX[1] >= value); // condition code == 2 - ">="
-			else if (cond_code == 3)	res = (XX[1] < value); // condition code == 3 - "<"
-			else if (cond_code == 4)	res = (XX[1] <= value); // condition code == 4 - "<="
-			else if (cond_code == 5)	res = (XX[1] != value); // condition code == 5 - "<>"
-			if (res == False)
-			{
-				pass_DataProcCmds(index, proc, instr_count);
-			}
-			break;
-		}
-		case INS_IF_COND_X2:
-		{
-			if (instr->count != 3) break;  // инструкция содержит три параметра: число, с которым сравнивается X2, код условия,
-					   	   	   	   	   	   // количество инструкций, на которое необходимо перейти в случае невыполнения условия
-			float value = instr->params[0];
-			int cond_code = instr->params[1];
-			int instr_count = (int) instr->params[2];
-			Bool res = False;
-			if (cond_code == 0) 		res = (XX[2] == value); // condition code == 0 - "=="
-			else if (cond_code == 1)	res = (XX[2] > value); // condition code == 1 - ">"
-			else if (cond_code == 2)	res = (XX[2] >= value); // condition code == 2 - ">="
-			else if (cond_code == 3)	res = (XX[2] < value); // condition code == 3 - "<"
-			else if (cond_code == 4)	res = (XX[2] <= value); // condition code == 4 - "<="
-			else if (cond_code == 5)	res = (XX[2] != value); // condition code == 5 - "<>"
-			if (res == False)
-			{
-				pass_DataProcCmds(index, proc, instr_count);
-			}
-			break;
-		}
-		case INS_IF_COND_X3:
-		{
-			if (instr->count != 3) break; 		// инструкция содержит три параметра: число, с которым сравнивается X3, код условия,
-					   	   	   	   	   	   	    // количество инструкций, на которое необходимо перейти в случае невыполнения условия
-			float value = instr->params[0];
-			int cond_code = instr->params[1];
-			int instr_count = (int) instr->params[2];
-			Bool res = False;
-			if (cond_code == 0) 		res = (XX[3] == value); // condition code == 0 - "=="
-			else if (cond_code == 1)	res = (XX[3] > value); // condition code == 1 - ">"
-			else if (cond_code == 2)	res = (XX[3] >= value); // condition code == 2 - ">="
-			else if (cond_code == 3)	res = (XX[3] < value); // condition code == 3 - "<"
-			else if (cond_code == 4)	res = (XX[3] <= value); // condition code == 4 - "<="
-			else if (cond_code == 5)	res = (XX[3] != value); // condition code == 5 - "<>"
-			if (res == False)
-			{
-				pass_DataProcCmds(index, proc, instr_count);
-			}
-			break;
-		}
-		case INS_IF_COND:
-		{
-			if (instr->count != 3) break; 	// инструкция содержит три параметра: два числа, которые сравнивается, количество инструкций,
-					   	   	   	   	   	    // на которое необходимо перейти в случае неравенства чисел
-			float value1 = instr->params[0];
-			float value2 = instr->params[1];
-			int instr_count = (int) instr->params[2];
-			if (value1 != value2)
-			{
-				pass_DataProcCmds(index, proc, instr_count);
-			}
-			break;
-		}
-		case INS_CLEAR_HX:			clearDataHeap(data_heap, &data_heap_len[0], instr);	break;
-		case INS_NOISE_UPP_PRE1:	noiseUppDataPreprocessing1(upp_buffer, bank, data_heap, &data_heap_len[0], processing_params, instr); break;
-		case INS_SGN_UPP_PRE1:		signalUppDataPreprocessing1(upp_buffer, bank, data_heap, processing_params, instr); break;
-		case INS_NS_SGN_UPP_PRE3:	signal_noise_UppDataPreprocessing3(upp_buffer, bank, data_heap, &data_heap_len[0], processing_params, instr); break;
-		case INS_NOISE_PROC1:		noiseProcessing1(upp_buffer, bank, rad, instr, processing_params, output_data); break;
-		case INS_SGN_PROC1:			signalProcessing1(upp_buffer, bank, rad, instr, processing_params, summ_data, output_data); break;
-		case INS_NOISE_PROC2:		noiseProcessing2(bank, data_heap, rad, instr, processing_params, output_data); break;
-		case INS_SGN_PROC2:			signalProcessing2(bank, data_heap, rad, instr, processing_params, summ_data, output_data); break;
-		case INS_SGN_PROC3:			signalProcessing3(bank, data_heap, rad, instr, processing_params, summ_data, output_data); break;
+		*/
+		case INS_KPMG_PREPROCESS:		data_preprocessing_kpmg(ds, data_heap_samples[ds->echo_number], ptr_temp_data, instr); break;
+		case INS_KPMG_PROCESS:			data_processing_kpmg(ds, data_heap_samples, instr, bank, rad, processing_params, output_data); break;
+		//case INS_SGN_PROC3:			signalProcessing3(bank, data_heap, rad, instr, processing_params, summ_data, output_data); break;
 		case INS_GO_TO:
 		{
 			if (instr->count != 1) break;
@@ -3483,73 +3081,43 @@ void executeProcPack(Data_Proc *proc, int index)
 
 }
 
-
-// Init Samples Buffer --------------------------------------------------------
-/*void initDataSamples(DataSample **d_samples, int count)
+void clearDataSamples()
 {
-	int i;
-	for (i = 0; i < count; i++)
-	{
-		DataSample *data_sample = (DataSample*) malloc(sizeof(DataSample));
+	samples_buffer_pos = 0;
 
-		data_sample->data_ptr = NULL;
+	int i;
+	for (i = 0; i < UPP_DATA_COUNT; i++)
+	{
+		DataSample *data_sample = data_samples[i];
+		data_sample->data_ptr = 0;
 		data_sample->data_len = 0;
 		data_sample->echo_number = 0;
 		data_sample->proc_id = 0;
 		data_sample->tool_id = 0;
 		data_sample->channel_id = 0;
-		//data_sample->heap_ptr = data_heap[i];
-		//data_sample->heap_len = 0;
 		data_sample->tag = 0;
 
-		d_samples[i] = data_sample;
+		data_samples[i] = data_sample;
 	}
-
 	current_data_sample = 0;
-	samples_buffer_pos = 0;
-	ds_new_data_enabled = 1;
-	//ds_proc_data_index = 0;
+	ds_new_data_enabled = 0;
+	processed_data_sample = 0;
 }
-*/
 
-/*
-int check_stb()
+void clearDataHeap()
 {
-	static volatile uint32_t pin, pin_prev;
-	static volatile int first_run = TRUE;
-	volatile uint32_t i;
-	volatile int ret_code;
-
-	if (first_run == TRUE)
+	int i;
+	for (i = 0; i < DATA_HEAP_COUNT; i++)
 	{
-		pins_reg_prev = GPIO_B0_RD();
-		first_run = FALSE;
+		DataHeap *data_heap = data_heap_samples[i];
+
+		memset(data_heap->data_ptr, 0x0, DATA_MAX_LEN*sizeof(float));
+		data_heap->data_len = 0;
+		data_heap->tag = 0;
+		data_heap->echo_number = 0;
 	}
-	pins_reg = GPIO_B0_RD();
-
-	for (i = 0; i < STB_PINS_COUNT; i++)
-	{
-		pin = (pins_reg & (1 << i)) >> i;
-		pin_prev = (pins_reg_prev & (1 << i)) >> i;
-		if ((pin_prev == 0) && (pin == 0)) stb[i] = STB_LOW_LVL;
-		else if ((pin_prev == 1) && (pin == 1)) stb[i] = STB_HIGH_LVL;
-		else if ((pin_prev == 0) && (pin == 1))	stb[i] = STB_RISING_EDGE;
-		else if ((pin_prev == 1) && (pin == 0))	stb[i] = STB_FALLING_EDGE;
-		else
-		{
-			stb[i] = STB_ERROR;
-			ret_code = STB_ERROR;
-		}
-	}
-
-	pins_reg_prev = pins_reg;
-
-	pins_reg = (pins_reg >> 5) & 0x000000FF;
-	pins_cmd = pins_reg;
-
-	return (ret_code);
 }
-*/
+
 
 void toMeasureTemperatures()
 {

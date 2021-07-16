@@ -15,11 +15,13 @@
 #include "../Common/OMAPL138_global.h"
 
 
+#define CSL_ASYNC_FREQ                    (120000u)
+
 
 typedef struct
 {
-	Uint32 	freq;
-	Bool 	enabled;
+	uint64_t 	freq;
+	Bool 		enabled;
 } Timer_Settings;
 
 

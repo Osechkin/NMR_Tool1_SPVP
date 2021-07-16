@@ -235,6 +235,7 @@ Bool next_DataProcCmd(int index, Data_Proc *d_proc, Data_Cmd *ptr_cmd)
 	int pos = d_proc->index[index];
 	if (pos >= d_proc->proc_lens[index])
 	{
+		// Выполнили последнюю инструкцию
 		d_proc->index[index] = d_proc->proc_lens[index];
 		return False;
 	}
@@ -324,9 +325,6 @@ void setDefaultProcParams(Processing_Params *params)
 	params->spectr_sigma = 1024;
 	params->tag = 0;
 	params->zero_level = 2048;
-	params->points_count = 0;
-	params->group_index = 0;
-	params->channel_id = 0xFF;
 }
 
 
@@ -451,9 +449,8 @@ void cast_UPPDataToFID2(uint8_t *src, Processing_Params *proc_params, float *dst
 	proc_params->points_count = 2*src_len;
 }
  */
-void cast_UPPDataToFID2(uint8_t *src, Processing_Params *proc_params, float *dst)
+void cast_UPPDataToFID2(uint8_t *src, int src_len, float *dst)
 {
-	int src_len = proc_params->points_count;
 	if (src_len == 0) return;
 
 	int i;
@@ -482,8 +479,6 @@ void cast_UPPDataToFID2(uint8_t *src, Processing_Params *proc_params, float *dst
 		dst[index] = (x - M)*ADC_to_mV;
 		index += 2;
 	}
-
-	proc_params->points_count = 2*src_len;
 }
 
 /* функция приведения исходных данных измеренного спинового эхо в буфере UPP
@@ -602,9 +597,8 @@ void cast_UPPDataToSE(uint8_t *src, int src_len, float *dst)
 
 	proc_params->points_count = 2*src_len;
 }*/
-void cast_UPPDataToSE2(uint8_t *src, Processing_Params *proc_params, float *dst)
+void cast_UPPDataToSE2(uint8_t *src, int src_len, float *dst)
 {
-	int src_len = proc_params->points_count;
 	if (src_len == 0) return;
 
 	int i;
@@ -647,8 +641,6 @@ void cast_UPPDataToSE2(uint8_t *src, Processing_Params *proc_params, float *dst)
 		dst[index++] = (x - M)*ADC_to_mV;
 		dst[index++] = 0;
 	}
-
-	proc_params->points_count = 2*src_len;
 }
 
 /* функция определения "нулевого уровня" (обычно ~2048) в массиве оцифрованных данных
@@ -994,8 +986,9 @@ void add_ValueToXX(SummationBuffer *sum_buff, Data_Cmd *instr)
 
 /* Функция накопления данных
  * src_len - длина данных
+ * N - номер накопления
  */
-void accumulate_Data(STACKPtrF *stack, int src_len, Processing_Params *proc_params)
+void accumulate_Data(STACKPtrF *stack, int src_len, int N)
 {
 	if (stack->cnt < 2) return;			// в стеке должны быть: буффер-источник данных (в ST0) и буффер-накопитель данных (в ST1)
 
@@ -1003,8 +996,6 @@ void accumulate_Data(STACKPtrF *stack, int src_len, Processing_Params *proc_para
 	float *dst = STACKPtrF_first(stack); //ps-1
 
 	int i;
-	int N = proc_params->current_echo;
-
 	if (N < 2) memcpy(dst, src, src_len*sizeof(float));
 	else
 	{
@@ -1018,9 +1009,10 @@ void accumulate_Data(STACKPtrF *stack, int src_len, Processing_Params *proc_para
 /* Функция накопления данных с экспоненциальным сглаживаинем
  * src_len - длина данных
  * alpha - параметр сглаживания (0 <= alpha <= 1000)
+ * N - номер текущего накопления
  *
  */
-void accsmooth_Data(STACKPtrF *stack, int src_len, Processing_Params *proc_params, Data_Cmd *instr)
+void accsmooth_Data(STACKPtrF *stack, int src_len, int N, Data_Cmd *instr)
 {
 	if (stack->cnt < 3) return;			// в стеке должны быть: буфферы-источники данных (в ST0, ST1) и буффер-накопитель данных (в ST2)
 
@@ -1032,8 +1024,6 @@ void accsmooth_Data(STACKPtrF *stack, int src_len, Processing_Params *proc_param
 	alpha /= 1000;
 
 	int i;
-	int N = proc_params->current_echo;
-
 	if (N < 2) memcpy(dst1, src, src_len*sizeof(float));
 	else
 	{
@@ -1059,7 +1049,7 @@ void accsmooth_Data(STACKPtrF *stack, int src_len, Processing_Params *proc_param
 /* Функция прореживания данных в стеке
  * Результат помещается на вершину стека
  */
-Bool decimateDataInOutputbuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Params *proc_params, Data_Cmd *instr)
+Bool decimateDataInOutputbuffer(STACKPtrF *stack, OutBuffer *out_buff, int src_len, uint8_t channel_id, Data_Cmd *instr)
 {
 	if (stack->cnt < 1) return False;			// в стеке должны быть: буффер-источник данных (в ST0) и буффер-накопитель данных (в ST1)
 
@@ -1078,15 +1068,8 @@ Bool decimateDataInOutputbuffer(STACKPtrF *stack, OutBuffer *out_buff, Processin
 		int decim_step = instr->params[0];
 		if (decim_step < 1) decim_step = 1;
 
-		//int src_len = proc_params->points_count/2;
-		//int pre_pos = (DATA_MAX_LEN - 2*src_len)/2;
-		int src_len = proc_params->points_count;
 		int pre_pos = (DATA_MAX_LEN - src_len)/2;
 		if (pre_pos < 0) pre_pos = 0;
-
-		//src_len = proc_params->points_count/2/decim_step;
-		//if (src_len % decim_step > 0) dst_len++;
-		//if (src_len < decim_step) return False;
 
 		int i;
 		int index = 0;
@@ -1098,10 +1081,10 @@ Bool decimateDataInOutputbuffer(STACKPtrF *stack, OutBuffer *out_buff, Processin
 			val_abs = Q_rsqrt(val_re*val_re + val_im*val_im);
 			dst[dst_pos+index++] = val_abs;
 		}
-		out_buff->outdata_len[data_cnt] = index; //src_len;
-		out_buff->full_size += index; //src_len;
+		out_buff->outdata_len[data_cnt] = index;
+		out_buff->full_size += index;
 		out_buff->data_id[data_cnt] = data_type;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		out_buff->outdata_counter++;
 		break;
 	}
@@ -1139,31 +1122,6 @@ Bool summarize_Data(STACKPtrF *stack, int src_len, SummationBuffer *sum_buff, Da
 	return True;
 }
 
-Bool summarize_DataForRelax(STACKPtrF *stack, int src_len, SummationBuffer *sum_buff, Processing_Params *proc_params, Data_Cmd *instr)
-{
-	if (stack->cnt < 1) return False;			// в стеке должны быть: буффер-источник данных (в ST0)
-
-	uint8_t cmd = instr->type;
-	sum_buff->data_id = cmd;
-	sum_buff->channel_id = proc_params->channel_id; //proger_rd_ch_number();
-
-	float *src = STACKPtrF_pop(stack);
-	int i;
-	float S = 0;
-	for (i = 0; i < src_len/2; i++)
-	{
-		S += src[i];
-	}
-
-	int index = /*sum_buff->pos +*/ proc_params->current_echo - 1;
-	if (index >= sum_buff->max_size) return False;
-	if (index < 0) index = 0;
-
-	sum_buff->sum_data[index] = S;
-	sum_buff->pos = index+1;
-
-	return True;
-}
 
 // Функция усреднения массива данных, находящегося в стеке
 Bool average_Data(STACKPtrF *stack, int src_len, SummationBuffer *sum_buff, Data_Cmd *instr)
@@ -1197,36 +1155,8 @@ Bool average_Data(STACKPtrF *stack, int src_len, SummationBuffer *sum_buff, Data
 	return True;
 }
 
-/* Перенос данных в буфер хранения данных ЯМР */
-/*Bool move_ToNMRBuffer(STACKPtrF *stack, int src_len, float *dst, int *dst_len, Processing_Params *proc_params, Data_Cmd *instr)
-{
-	if (stack->cnt < 1) return False;			// в стеке должны быть: буффер-источник данных (в ST0) и буффер-накопитель данных (в ST1)
 
-	float *src = STACKPtrF_pop(stack);
-
-	uint8_t data_type = instr->type;
-	switch (data_type)
-	{
-	case DT_SGN_SE:
-	case DT_RFP:
-		{
-			int pre_pos = proc_params->points_count/2;
-			memcpy(dst, src+pre_pos, proc_params->points_count*sizeof(float));
-			*dst_len = proc_params->points_count;
-			break;
-		}
-	case RELAX_DATA:
-		{
-			memcpy(dst, src, src_len*sizeof(float));
-			*dst_len = proc_params->echo_count; break;
-		}
-	default: return False;
-
-	return True;
-	}
-}*/
-
-Bool move_AccToOutputBuffer(STACKPtrF *stack, SummationBuffer *sum_buff, OutBuffer *out_buff, Processing_Params *proc_params)
+Bool move_AccToOutputBuffer(STACKPtrF *stack, SummationBuffer *sum_buff, OutBuffer *out_buff, uint8_t channel_id)
 {
 	static int ii = 0;
 	ii++;
@@ -1241,24 +1171,12 @@ Bool move_AccToOutputBuffer(STACKPtrF *stack, SummationBuffer *sum_buff, OutBuff
 	int dst_pos = out_buff->full_size;
 	int data_cnt = out_buff->outdata_counter;
 
-	/*int echo_count = proc_params->echo_count;
-	float *tmp = (float*)calloc(echo_count, sizeof(float));
-	memset(tmp, 0xFF, echo_count*sizeof(float));
-	memcpy(tmp, sum_buff->sum_data, echo_count_sum*sizeof(float));
-
-	STACKPtrF_push(tmp, stack);
-	int last_index = out_buff->outdata_counter;
-	out_buff->group_index[last_index-1] = sum_buff->group_index;
-	move_ToOutputBuffer(stack, out_buff, proc_params, cmd);
-
-	SummationBuffer_ClearAll(sum_buff);*/
-
 	float *tmp = (float*)calloc(echo_count_sum, sizeof(float));
 	memcpy(dst+dst_pos, sum_buff->sum_data, echo_count_sum*sizeof(float));
 	out_buff->outdata_len[data_cnt] = echo_count_sum;
 	out_buff->full_size += echo_count_sum;
 	out_buff->data_id[data_cnt] = cmd;
-	out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+	out_buff->channel_id[data_cnt] = channel_id;
 	out_buff->outdata_counter++;
 	out_buff->group_index[data_cnt] = sum_buff->group_index;
 
@@ -1270,7 +1188,7 @@ Bool move_AccToOutputBuffer(STACKPtrF *stack, SummationBuffer *sum_buff, OutBuff
 }
 
 
-Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Params *proc_params, uint8_t data_type)
+Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, int src_len, uint8_t channel_id, uint8_t data_type)
 {
 	if (stack->cnt < 1) return False;			// в стеке должны быть: буффер-источник данных (в ST0) и буффер-накопитель данных (в ST1)
 
@@ -1279,23 +1197,16 @@ Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Param
 	int dst_pos = out_buff->full_size;
 	int data_cnt = out_buff->outdata_counter;
 
-	/*if (dst_pos + proc_params->points_count > NMR_DATA_LEN)
-	{
-		volatile int aaa = 0;
-		return False;
-	}*/
-
 	switch (data_type)
 	{
 	case DT_SGN_FID_ORG:
 	case DT_NS_FID_ORG:
 	{
-		int src_len = proc_params->points_count;
 		memcpy(dst+dst_pos, src, src_len*sizeof(float));
 		out_buff->outdata_len[data_cnt] = src_len;
 		out_buff->full_size += src_len;
 		out_buff->data_id[data_cnt] = data_type;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		out_buff->outdata_counter++;
 		break;
 	}
@@ -1304,14 +1215,13 @@ Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Param
 	//case DT_SGN_SE:
 	//case DT_NS_SE:
 	{
-		int src_len = proc_params->points_count;
 		int pre_pos = (DATA_MAX_LEN - src_len)/2;
 		if (pre_pos < 0) pre_pos = 0;
 		memcpy(dst+dst_pos, src+pre_pos, src_len*sizeof(float));
 		out_buff->outdata_len[data_cnt] = src_len;
 		out_buff->full_size += src_len;
 		out_buff->data_id[data_cnt] = data_type;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id;//proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		out_buff->outdata_counter++;
 		break;
 	}
@@ -1319,28 +1229,26 @@ Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Param
 	case DT_NS_SE:
 	case DT_RFP:
 	{
-		int src_len = proc_params->points_count/2;
-		int pre_pos = (DATA_MAX_LEN - 2*src_len)/2;
+		int pre_pos = (DATA_MAX_LEN - src_len)/2;
 		if (pre_pos < 0) pre_pos = 0;
 		int i;
-		for (i = 0; i < src_len; i++) dst[dst_pos+i] = src[pre_pos+2*i];
+		for (i = 0; i < src_len; i++) dst[dst_pos+i] = src[pre_pos+i];
 		out_buff->outdata_len[data_cnt] = src_len;
 		out_buff->full_size += src_len;
 		out_buff->data_id[data_cnt] = data_type;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		out_buff->outdata_counter++;
 		break;
 	}
 	case DT_SGN_FID:
 	case DT_NS_FID:
 	{
-		int src_len = proc_params->points_count/2;
 		int i;
-		for (i = 0; i < src_len; i++) dst[dst_pos+i] = src[2*i];
+		for (i = 0; i < src_len; i++) dst[dst_pos+i] = src[i];
 		out_buff->outdata_len[data_cnt] = src_len;
 		out_buff->full_size += src_len;
 		out_buff->data_id[data_cnt] = data_type;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		out_buff->outdata_counter++;
 		break;
 	}
@@ -1349,37 +1257,36 @@ Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Param
 	case DT_SGN_QUAD_FID:
 	case DT_NS_QUAD_FID:
 	{
-		int src_len = proc_params->points_count;
 		int pre_pos = (DATA_MAX_LEN - src_len)/2;
 		if (pre_pos < 0) pre_pos = 0;
 		int i;
-		int data_len = proc_params->points_count/2;
+		int data_len = src_len/2;
 		for (i = 0; i < data_len; i++)
 		{
 			*(dst+dst_pos+i) = src[pre_pos+2*i];
 		}
-		out_buff->outdata_len[data_cnt] = proc_params->points_count/2;
-		out_buff->full_size += proc_params->points_count/2;
+		out_buff->outdata_len[data_cnt] = src_len/2;
+		out_buff->full_size += src_len/2;
 		out_buff->outdata_counter++;
 		if (data_type == DT_SGN_QUAD_SE) out_buff->data_id[data_cnt] = DT_SGN_QUAD_SE_RE;
 		else if (data_type == DT_NS_QUAD_SE) out_buff->data_id[data_cnt] = DT_NS_QUAD_SE_RE;
 		else if (data_type == DT_SGN_QUAD_FID) out_buff->data_id[data_cnt] = DT_SGN_QUAD_FID_RE;
 		else out_buff->data_id[data_cnt] = DT_NS_QUAD_FID_RE;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		dst_pos += data_len;
 		data_cnt++;
 		for (i = 0; i < data_len; i++)
 		{
 			*(dst+dst_pos+i) = src[pre_pos+2*i+1];
 		}
-		out_buff->outdata_len[data_cnt] = proc_params->points_count/2;
-		out_buff->full_size += proc_params->points_count/2;
+		out_buff->outdata_len[data_cnt] = src_len/2;
+		out_buff->full_size += src_len/2;
 		out_buff->outdata_counter++;
 		if (data_type == DT_SGN_QUAD_SE) out_buff->data_id[data_cnt] = DT_SGN_QUAD_SE_IM;
 		else if (data_type == DT_NS_QUAD_SE) out_buff->data_id[data_cnt] = DT_NS_QUAD_SE_IM;
 		else if (data_type == DT_SGN_QUAD_FID) out_buff->data_id[data_cnt] = DT_SGN_QUAD_FID_IM;
 		else out_buff->data_id[data_cnt] = DT_NS_QUAD_FID_IM;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		break;
 	}
 	case DT_NS_FFT_FID:
@@ -1403,7 +1310,7 @@ Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Param
 		else if (data_type == DT_NS_FFT_SE) out_buff->data_id[data_cnt] = DT_NS_FFT_SE_RE;
 		else if (data_type == DT_SGN_FFT_FID) out_buff->data_id[data_cnt] = DT_SGN_FFT_FID_RE;
 		else out_buff->data_id[data_cnt] = DT_NS_FFT_FID_RE;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 
 		dst_pos += data_len;
 		data_cnt++;
@@ -1419,7 +1326,7 @@ Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Param
 		else if (data_type == DT_NS_FFT_SE) out_buff->data_id[data_cnt] = DT_NS_FFT_SE_IM;
 		else if (data_type == DT_SGN_FFT_FID) out_buff->data_id[data_cnt] = DT_SGN_FFT_FID_IM;
 		else out_buff->data_id[data_cnt] = DT_NS_FFT_FID_IM;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		break;
 	}
 	case DT_SGN_FFT_FID_AM:
@@ -1432,7 +1339,7 @@ Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Param
 		out_buff->outdata_len[data_cnt] = src_len;
 		out_buff->full_size += src_len;
 		out_buff->data_id[data_cnt] = data_type;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		out_buff->outdata_counter++;
 		break;
 	}
@@ -1448,27 +1355,17 @@ Bool move_ToOutputBuffer(STACKPtrF *stack, OutBuffer *out_buff, Processing_Param
 		out_buff->outdata_len[data_cnt] = src_len;
 		out_buff->full_size += src_len;
 		out_buff->data_id[data_cnt] = data_type;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		out_buff->outdata_counter++;
 		break;
 	}
-	/*case RELAX_DATA:
-	{
-		int src_len = proc_params->echo_count;
-		memcpy(dst+dst_pos, src, src_len*sizeof(float));
-		out_buff->outdata_len[data_cnt] = src_len;
-		out_buff->full_size += src_len;
-		out_buff->data_id[data_cnt] = data_type;
-		out_buff->outdata_counter++;
-		break;
-	}*/
 	default: return False;
 	}
 
 	return True;
 }
 
-Bool move_XXToOutBuffer(SummationBuffer *sum_buff, OutBuffer *out_buff, Processing_Params *proc_params, Data_Cmd *instr)
+Bool move_XXToOutBuffer(SummationBuffer *sum_buff, OutBuffer *out_buff, uint8_t channel_id, Data_Cmd *instr)
 {
 	if (instr->count != 1) return False;		// у инструкции имеется один параметр
 
@@ -1499,7 +1396,7 @@ Bool move_XXToOutBuffer(SummationBuffer *sum_buff, OutBuffer *out_buff, Processi
 		out_buff->outdata_len[data_cnt] = 1;
 		out_buff->full_size += 1;
 		out_buff->data_id[data_cnt] = data_type;
-		out_buff->channel_id[data_cnt] = proc_params->channel_id; //proger_rd_ch_number();
+		out_buff->channel_id[data_cnt] = channel_id;
 		out_buff->outdata_counter++;
 		break;
 	}
@@ -1679,3 +1576,22 @@ void TimingProc_Buffer_Print2(TimingProc_Buffer *timproc_buff)
 	}
 	printf("\n\n");
 }
+
+
+// Profiler to measure code execution time using the CPU clocks
+// Start profiling...
+uint64_t Profiler_Start(uint32_t tsch, uint32_t tscl)
+{
+	uint64_t tsc_state = 0;
+	return ((tsc_state | tsch) << 32) | tscl;
+}
+
+// Stop profiling !
+uint32_t Profiler_Stop(uint64_t clock_start, uint32_t tsch, uint32_t tscl)
+{
+	uint64_t cur_tsc = 0;
+	cur_tsc = (((cur_tsc | tsch) << 32) | tscl) - clock_start;
+
+	return (uint32_t)(cur_tsc / 300);		// time in mks
+}
+// -------------------------------------------------------------
