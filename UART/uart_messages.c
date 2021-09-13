@@ -492,11 +492,6 @@ void calcRecoveryPart(uint8_t *src, uint8_t *dst, MsgPacket *_msg_pack, GF_Data 
 
 	int res = RS_encode(a, g, gf, r);
 
-	/*uint8_t rr[255];
-	memset(&rr[0], 0x0, sizeof(uint8_t)*255);
-	int i;
-	for (i = 0; i < block_len; i++) rr[i] = r->data[i];*/
-
 	GFPoly_self_inv(r);
 
 	memcpy(dst, r->data, 2*errs_count*sizeof(uint8_t));
@@ -602,17 +597,14 @@ void pushDataToMsgPacket(uint8_t *data, uint16_t data_len, uint16_t *pos, MsgPac
 	uint8_t crc = Crc8(&tdata[0], tdata_len-1);									// контрольная сумма по данным, помещаемым в пакет
 	tdata[tdata_len - 1] = crc;
 
-	//int i; for (i = 0; i < tdata_len; i++) printf("%i ",tdata[i]);
-
 	uint8_t apos = 0;															// текущая позиция данных в массиве arr
 	uint8_t tpos = 0;															// текущая позиция данных в массиве tdata
 	uint8_t rec_data[2*MAX_REC_ERRS];
 	uint16_t rec_len = 2 * _msg_pack->rec_errs;
+
 	while (block_cnt-- > 0)
 	{
-		//uint8_t ready_arr[18];
 		memcpy(&arr[apos], &tdata[tpos], data_block_len*sizeof(uint8_t));
-		//int i; for (i = 0; i < data_block_len; i++) ready_arr[i] = tdata[tpos+i];
 		calcRecoveryPart(&arr[apos], &rec_data[0], _msg_pack, _gf_data);
 		memcpy(&arr[apos + data_block_len], &rec_data[0], rec_len*sizeof(uint8_t));
 

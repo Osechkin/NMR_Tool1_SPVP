@@ -11,6 +11,8 @@
 
 #include "galua.h"
 
+#include "../proger/proger.h"
+
 
 int GF_init(guint8 _pow, GF *gf)
 {
@@ -254,6 +256,7 @@ guint8 GFPoly_deg(GFPoly *gf_poly)
 int GFPoly_add(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
 {
 	int res = GFPoly_add_elems(gfp1, gfp2, gf, dst);
+
 	if (res == E_GFP_OK) res = GFPoly_reduce(dst);
 
 	return res;
@@ -359,10 +362,6 @@ int GFPoly_mulN(guint8 N, GFPoly *gfp1, GF *gf)
 
 int GFPoly_div(GFPoly *a, GFPoly *g, GF *gf, GFPoly *q, GFPoly *r)
 {
-	if (a->data[2] == 100 && a->data[3] == 206 && a->data[4] == 0 && a->data[5] == 63)
-	{
-		int tt = 0;
-	}
     if (!a) return E_GFP_FATAL;
     if (!a->data) return E_GFP_FATAL;
     if (a->power < 1 || a->power == NoD) return E_GFP_NODATA;
@@ -386,14 +385,17 @@ int GFPoly_div(GFPoly *a, GFPoly *g, GF *gf, GFPoly *q, GFPoly *r)
     GFPoly_copy(q1, g);
     GFPoly_reduce(r1);
     GFPoly_reduce(q1);
+
 	while (u-m >= 0)
     {
         guint8 p = u - m;
         guint8 y = GF_div(r1->data[u], q1->data[m], gf);
-		
+
+        proger_restart_time_counter();
 		GFPoly_shr(p, q1);
-        GFPoly_mulN(y, q1, gf);
+		GFPoly_mulN(y, q1, gf);
         GFPoly_add(q1,r1,gf,r2);
+        volatile unsigned int tm = proger_read_time_counter()/100;
 
         //GFPoly_reduce(r2);
 				
@@ -404,11 +406,12 @@ int GFPoly_div(GFPoly *a, GFPoly *g, GF *gf, GFPoly *q, GFPoly *r)
         m = q1->power;
 
         q2->data[0] = y;
-        if (u-m >= 0) GFPoly_shr(1,q2);   
+        if (u-m >= 0) GFPoly_shr(1,q2);
 	}
 
     GFPoly_reduce(q2);
     GFPoly_reduce(r2);
+
     GFPoly_set(q2->data, q2->power+1, q);
     GFPoly_set(r2->data, r2->power+1, r);
 
@@ -566,7 +569,7 @@ int GFPoly_reduce(GFPoly *gfp1)
     gfp1->data = (guint8*)calloc(sz, sizeof(guint8));
     memcpy(gfp1->data, z, sz*sizeof(guint8));
     gfp1->power = hpow;
-	
+
     free(z);
 
     return E_GFP_OK;

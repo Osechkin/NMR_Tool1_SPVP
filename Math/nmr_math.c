@@ -769,6 +769,8 @@ void data_preprocessing_kpmg(DataSample *data_sample, DataHeap *data_heap_sample
 
 	// эмулировать данные шума и сигнала, если соответствующий параметр > 0
 	uint8_t *upp_data = data_sample->data_ptr;
+	//uint8_t temp[512];
+	//memcpy(&temp[0], data_sample->data_ptr, 512);
 	if (data_src > 0)
 	{
 		if (src_number <= NN)	// эмуляция шума
@@ -843,131 +845,142 @@ void data_processing_kpmg(DataSample *ds, DataHeap **data_heap_samples, Data_Cmd
 {
 	if (instr->count != 6) return;
 
-		int NN = (int)instr->params[0];					// количество окон шума
-		int NS = (int)instr->params[1];					// количество окон сигнала
-		int out_time_data = (int)instr->params[2];		// выводить/не выводить накопленные во временной области данные АЦП: если не выводить, то = 0, если вывести, то = номеру эхо
-		int out_spec_data = (int)instr->params[3];		// выводить/не выводить спектр мощности сигнала после: мощностной спектр фурье, наложение окна в спектральной области. Если =0, то не выводить, иначе = номеру эхо, от которого бедется спектр
-		int group_index = (int)instr->params[4];		// групповой индекс
-		uint8_t data_code = (uint8_t)instr->params[5];	// код данных
+	int NN = (int)instr->params[0];					// количество окон шума
+	int NS = (int)instr->params[1];					// количество окон сигнала
+	int out_time_data = (int)instr->params[2];		// выводить/не выводить накопленные во временной области данные АЦП: если не выводить, то = 0, если вывести, то = номеру эхо
+	int out_spec_data = (int)instr->params[3];		// выводить/не выводить спектр мощности сигнала после: мощностной спектр фурье, наложение окна в спектральной области. Если =0, то не выводить, иначе = номеру эхо, от которого бедется спектр
+	int group_index = (int)instr->params[4];		// групповой индекс
+	uint8_t data_code = (uint8_t)instr->params[5];	// код данных
 
-		int ds_count = NN + NS;							// общее количество эхо (выборки шума и эхо)
+	int ds_count = NN + NS;							// общее количество эхо (выборки шума и эхо)
 
-		//clock_t t_start, t_stop, t_overhead;
-		//t_start = clock();
-		//t_stop = clock();
-		//t_overhead = t_stop - t_start;
-		//t_start = clock();
+	//clock_t t_start, t_stop, t_overhead;
+	//t_start = clock();
+	//t_stop = clock();
+	//t_overhead = t_stop - t_start;
+	//t_start = clock();
 
-		float *data = data_bank[0];						// array in L2-stack data0. Используется для обработки текущего эхо шума или сигнала
-		float *data_integrals = data_bank[1];			// array in L2-stack data1. Используется для накопления интегралов эхо
-		float *temp_data = data_bank[8];
-		float *ptr_w = data_bank[9];
+	float *data = data_bank[0];						// array in L2-stack data0. Используется для обработки текущего эхо шума или сигнала
+	float *data_integrals = data_bank[1];			// array in L2-stack data1. Используется для накопления интегралов эхо
+	float *temp_data = data_bank[8];
+	float *ptr_w = data_bank[9];
 
-		memset(data_integrals, 0x00, DATA_MAX_LEN*sizeof(float));
-		memset(data, 0x00, DATA_MAX_LEN*sizeof(float));
+	memset(data_integrals, 0x00, DATA_MAX_LEN*sizeof(float));
+	memset(data, 0x00, DATA_MAX_LEN*sizeof(float));
 
-		int m, i;
-		// Обработка данных шума ----------------------------------
-		for (m = 0; m < ds_count; m++)
+	int m, i;
+	// Обработка данных шума ----------------------------------
+	for (m = 0; m < ds_count; m++)
+	{
+		DataHeap *data_heap = data_heap_samples[m];
+		int echo_number = data_heap->echo_number;
+		if (echo_number == 0) continue;
+
+		memcpy(data, data_heap->data_ptr, DATA_MAX_LEN*sizeof(float));
+
+		// ----- оконная функция во временной области ---------
+		applyWinFunc(data, data, DATA_MAX_LEN, proc_params, TIME_DOMAIN_DATA);
+		// ----------------------------------------------------
+
+		// - копирование в выходной буфер временнЫх данных накопленного шума
+		if (out_time_data > 0 && m == out_time_data)
 		{
-			DataHeap *data_heap = data_heap_samples[m];
-			memcpy(data, data_heap->data_ptr, DATA_MAX_LEN*sizeof(float));
+			float *dst = out_buff->out_data;
+			int dst_pos = out_buff->full_size;
+			int data_cnt = out_buff->outdata_counter;
 
-			// ----- оконная функция во временной области ---------
-			applyWinFunc(data, data, DATA_MAX_LEN, proc_params, TIME_DOMAIN_DATA);
-			// ----------------------------------------------------
-
-			// - копирование в выходной буфер временнЫх данных накопленного шума
-			if (out_time_data > 0 && m == out_time_data)
+			int src_len = data_heap->data_len;				// количество точек шума в выборке, измеренное АЦП
+			int pre_pos = (DATA_MAX_LEN - src_len)/2;
+			if (pre_pos < 0) pre_pos = 0;
+			for (i = 0; i < src_len; i++)
 			{
-				float *dst = out_buff->out_data;
-				int dst_pos = out_buff->full_size;
-				int data_cnt = out_buff->outdata_counter;
-
-				int src_len = data_heap->data_len;				// количество точек шума в выборке, измеренное АЦП
-				int pre_pos = (DATA_MAX_LEN - src_len)/2;
-				if (pre_pos < 0) pre_pos = 0;
-				for (i = 0; i < src_len; i++)
-				{
-					dst[dst_pos+i] = data[pre_pos+i];
-				}
-				out_buff->outdata_len[data_cnt] = src_len;
-				out_buff->full_size += src_len;
-				if (m < NN) out_buff->data_id[data_cnt] = DT_NS_SE;
-				else out_buff->data_id[data_cnt] = DT_SGN_SE;
-				out_buff->channel_id[data_cnt] = ds->channel_id;
-				out_buff->outdata_counter++;
+				dst[dst_pos+i] = data[pre_pos+i];
 			}
-			// ----------------------------------------------------
-
-			// --------- быстрое преобразование Фурье -------------
-			memcpy(temp_data - PAD, data - PAD, UPP_DATA_SIZE); 	// дублирование данных src, т.к. они разрушаются при выполнении функции DSPF_sp_fftSPxSP(...)
-			DSPF_sp_fftSPxSP(CMPLX_DATA_MAX_LEN, temp_data, ptr_w, data, brev, rad, 0, CMPLX_DATA_MAX_LEN);
-			// ----------------------------------------------------
-
-			// ------- вычисление спектра мощности шума -----------
-			int index = 0;
-			for (i = 0; i < DATA_MAX_LEN; i += 2)
-			{
-				data[index++] = data[i]*data[i] + data[i+1]*data[i+1];	// power spectrum
-			}
-			// ----------------------------------------------------
-
-			// ----- оконная функция в частотной области ------
-			applyWinFunc(data, data, DATA_MAX_LEN/2, proc_params, FREQ_DATA);
-			// ------------------------------------------------
-
-			// помещение в выходной буфер частотного спектра мощности шума
-			if (out_spec_data > 0  && m == out_spec_data)
-			{
-				float *dst = out_buff->out_data;
-				int dst_pos = out_buff->full_size;
-				int data_cnt = out_buff->outdata_counter;
-
-				int spec_len = DATA_MAX_LEN/2;
-				for (i = 0; i < spec_len; i++)
-				{
-					*(dst+dst_pos+i) = Q_rsqrt(data[i]);
-				}
-				out_buff->outdata_len[data_cnt] = spec_len;
-				out_buff->full_size += spec_len;
-				if (m < NN) out_buff->data_id[data_cnt] = DT_NS_FFT_SE_AM;
-				else out_buff->data_id[data_cnt] = DT_SGN_FFT_SE_AM;
-				out_buff->channel_id[data_cnt] = ds->channel_id;
-				out_buff->outdata_counter++;
-			}
-			// ----------------------------------------------------
-
-			float SNs = 0;
-			for (i = 0; i < DATA_MAX_LEN/2; i++) SNs += Q_rsqrt(data[i]);
-			data_integrals[m] = SNs;
+			out_buff->outdata_len[data_cnt] = src_len;
+			out_buff->full_size += src_len;
+			if (m < NN) out_buff->data_id[data_cnt] = DT_NS_SE;
+			else out_buff->data_id[data_cnt] = DT_SGN_SE;
+			out_buff->channel_id[data_cnt] = ds->channel_id;
+			out_buff->outdata_counter++;
 		}
+		// ----------------------------------------------------
 
-		// --- Усреднение интегралов спектров от выборок шума -----
+		// --------- быстрое преобразование Фурье -------------
+		memcpy(temp_data - PAD, data - PAD, UPP_DATA_SIZE); 	// дублирование данных src, т.к. они разрушаются при выполнении функции DSPF_sp_fftSPxSP(...)
+		DSPF_sp_fftSPxSP(CMPLX_DATA_MAX_LEN, temp_data, ptr_w, data, brev, rad, 0, CMPLX_DATA_MAX_LEN);
+		// ----------------------------------------------------
+
+		// ------- вычисление спектра мощности шума -----------
+		int index = 0;
+		for (i = 0; i < DATA_MAX_LEN; i += 2)
+		{
+			data[index++] = data[i]*data[i] + data[i+1]*data[i+1];	// power spectrum
+		}
+		// ----------------------------------------------------
+
+		// ----- оконная функция в частотной области ------
+		applyWinFunc(data, data, DATA_MAX_LEN/2, proc_params, FREQ_DATA);
+		// ------------------------------------------------
+
+		// помещение в выходной буфер частотного спектра мощности шума
+		if (out_spec_data > 0  && m == out_spec_data)
+		{
+			float *dst = out_buff->out_data;
+			int dst_pos = out_buff->full_size;
+			int data_cnt = out_buff->outdata_counter;
+
+			int spec_len = DATA_MAX_LEN/2;
+			for (i = 0; i < spec_len; i++)
+			{
+				*(dst+dst_pos+i) = Q_rsqrt(data[i]);
+			}
+			out_buff->outdata_len[data_cnt] = spec_len;
+			out_buff->full_size += spec_len;
+			if (m < NN) out_buff->data_id[data_cnt] = DT_NS_FFT_SE_AM;
+			else out_buff->data_id[data_cnt] = DT_SGN_FFT_SE_AM;
+			out_buff->channel_id[data_cnt] = ds->channel_id;
+			out_buff->outdata_counter++;
+		}
+		// ----------------------------------------------------
+
 		float SNs = 0;
-		for (i = 0; i < NN; i++) SNs += data_integrals[i];
-		SNs /= NN;
-		// --------------------------------------------------------
+		for (i = 0; i < DATA_MAX_LEN/2; i++) SNs += Q_rsqrt(data[i]);
+		data_integrals[m] = SNs;
+	}
 
-		// --- Вычитание амплитуды шума ---------------------------
-		for (m = 0; m < NS; m++) data_integrals[m+NN] = (data_integrals[m+NN] - SNs)/512.0;
+	// --- Усреднение интегралов спектров от выборок шума -----
+	float SNs = 0;
+	int cnt = 0;
+	for (i = 0; i < NN; i++)
+	{
+		if (data_integrals[i] == 0) continue;
+		SNs += data_integrals[i];
+		cnt++;
+	}
+	//SNs /= NN;
+	if (cnt > 0) SNs /= cnt;
+	// --------------------------------------------------------
 
-		// Запись накопленного спада с выходной буффер ------------
-		float *dst = out_buff->out_data;
-		int dst_pos = out_buff->full_size;
-		int data_cnt = out_buff->outdata_counter;
+	// --- Вычитание амплитуды шума ---------------------------
+	for (m = 0; m < NS; m++) data_integrals[m+NN] = (data_integrals[m+NN] - SNs)/512.0;
+	//for (m = 0; m < NS; m++) data_integrals[m+NN] = (data_integrals[m+NN])/512.0;
 
-		memcpy(dst+dst_pos, &data_integrals[NN], NS*sizeof(float));
-		out_buff->outdata_len[data_cnt] = NS;
-		out_buff->full_size += NS;
-		out_buff->data_id[data_cnt] = data_code;
-		out_buff->channel_id[data_cnt] = ds->channel_id;
-		out_buff->group_index[data_cnt] = group_index;
-		out_buff->outdata_counter++;
-		// --------------------------------------------------------
+	// Запись накопленного спада с выходной буффер ------------
+	float *dst = out_buff->out_data;
+	int dst_pos = out_buff->full_size;
+	int data_cnt = out_buff->outdata_counter;
 
-		//t_stop = clock();
-		//printf("\t NMR data processing time: %d clock cycles\n", (t_stop - t_start) - t_overhead);
+	memcpy(dst+dst_pos, &data_integrals[NN], NS*sizeof(float));
+	out_buff->outdata_len[data_cnt] = NS;
+	out_buff->full_size += NS;
+	out_buff->data_id[data_cnt] = data_code;
+	out_buff->channel_id[data_cnt] = ds->channel_id;
+	out_buff->group_index[data_cnt] = group_index;
+	out_buff->outdata_counter++;
+	// --------------------------------------------------------
+
+	//t_stop = clock();
+	//printf("\t NMR data processing time: %d clock cycles\n", (t_stop - t_start) - t_overhead);
 }
 
 
@@ -2190,3 +2203,26 @@ void signalProcessing3(float **data_bank, float **hx_bank, int rad, Data_Cmd *in
 	//printf("\t NMR data processing time: %d clock cycles\n", (t_stop - t_start) - t_overhead);
 }
 */
+
+
+void getGammaData(DataSample *ds, Data_Cmd *instr, OutBuffer *out_buff)
+{
+	uint32_t gamma_counts = proger_rd_gamma_count();
+
+	float TR = instr->params[0];
+	float gamma = 0;
+	if (TR > 0) gamma = 1000.0/TR*gamma_counts;
+
+	// Запись значения отсчетов/сек гамма в выходной буффер ---
+	float *dst = out_buff->out_data;
+	int dst_pos = out_buff->full_size;
+	int data_cnt = out_buff->outdata_counter;
+
+	memcpy(dst+dst_pos, &gamma, sizeof(float));
+	out_buff->outdata_len[data_cnt] = 1;
+	out_buff->full_size += 1;
+	out_buff->data_id[data_cnt] = DT_GAMMA;
+	out_buff->channel_id[data_cnt] = ds->channel_id;
+	out_buff->outdata_counter++;
+	// --------------------------------------------------------
+}

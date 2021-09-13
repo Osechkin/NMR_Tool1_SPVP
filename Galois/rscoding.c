@@ -39,8 +39,9 @@ int RS_encode(GFPoly *a, GFPoly *g, GF *gf, GFPoly *out)
 
         return E_RS_FATAL;
     }
-    
+
     res = GFPoly_div(aa,g,gf,q,out);
+    
 	//res = E_RS_FATAL;
     if (res != E_GFP_OK)
     {

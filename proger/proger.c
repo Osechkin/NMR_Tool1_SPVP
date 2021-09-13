@@ -74,8 +74,8 @@ unsigned int proger_read_time_counter ()
 
 	proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x00);
 	clks  = proger_rd_reg_32(MEM_ADDR_PIT_OUT_REG);
-	proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x02);
-	clks /= 100;
+	//proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x02);
+	//clks /= 100;
 
 	return (clks);
 }// proger_read_time_counter
@@ -88,8 +88,35 @@ unsigned int proger_restart_time_counter ()
 	proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x02);
 
 	return (0);
-}// proger_reset_time_counter
+}
 /*---------------------------------------------------------------------------*/
+
+unsigned int proger_reset_time_counter ()
+{
+	proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x01);
+
+	proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x00);
+
+	return (0);
+}
+/*---------------------------------------------------------------------------*/
+
+unsigned int proger_start_time_counter ()
+{
+	proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x02);
+
+	return (0);
+}
+/*---------------------------------------------------------------------------*/
+
+unsigned int proger_stop_time_counter ()
+{
+	proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x00);
+
+	return (0);
+}
+/*---------------------------------------------------------------------------*/
+
 
 unsigned int proger_read_gpio ()
 {

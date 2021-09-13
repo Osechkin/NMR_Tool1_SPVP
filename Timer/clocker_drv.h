@@ -44,7 +44,6 @@ extern void clocker1_ISR(void);
 extern void clocker2_ISR(void);
 extern void clocker3_ISR(void);
 extern void clocker4_ISR(void);
-extern void clocker5_ISR(void);
 
 
 void initClocker(uint64_t _max_val, void (*_ptr_isr)(void), Clocker *_clocker);

@@ -370,4 +370,6 @@ void emulate_EchoNoiseData(Data_Cmd *instr, uint8_t *dst, int index, int len);
 void data_preprocessing_kpmg(DataSample *data_sample, DataHeap *data_heap_sample, float *temp_data_ptr, Data_Cmd *instr);
 void data_processing_kpmg(DataSample *ds, DataHeap **data_heap_samples, Data_Cmd *instr, float **data_bank, int rad, Processing_Params *proc_params, OutBuffer *out_buff);
 
+void getGammaData(DataSample *ds, Data_Cmd *instr, OutBuffer *out_buff);
+
 #endif /* NMR_MATH_H_ */

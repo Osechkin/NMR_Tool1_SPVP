@@ -21,6 +21,10 @@ unsigned int proger_wr_reg_8  (unsigned int adr, unsigned char data);
 
 unsigned int proger_read_time_counter ();
 unsigned int proger_restart_time_counter ();
+unsigned int proger_start_time_counter ();
+unsigned int proger_stop_time_counter ();
+unsigned int proger_reset_time_counter ();
+
 
 int proger_rd_acquisition_info (unsigned char *array, unsigned int byte_count);
 

@@ -89,7 +89,7 @@ void executeServiceMsg(MsgHeader *_msg_header);
 void executeShortMsg(MsgHeader *_msg_header);
 void executeMultypackMsg(UART_Message *uart_msg);
 void responseMultypackHeader(MsgHeader *_msg_header);
-void requestLastMsg();
+//void requestLastMsg();
 void sendServiceMsg(MsgHeader *_msg_header, CSL_UartRegsOvly uartRegs);
 void sendShortMsg(MsgHeader *_msg_header, CSL_UartRegsOvly uartRegs);
 void sendHeader(MsgHeader *_msg_header, CSL_UartRegsOvly uartRegs);
@@ -108,6 +108,7 @@ void generateTestEchoData(int index, int count);
 Bool extractDataFromPacks(UART_Message *uart_msg, uint8_t *arr, uint16_t *len);
 void executeProcPack(Data_Proc *proc, DataSample *ds);
 void toMeasureTemperatures();
+void setOneWire();
 void setDefaultCommSettings();
 
 void clearDataSamples();
@@ -129,7 +130,6 @@ volatile unsigned int reg1 = 0, reg2 = 0, reg3 = 0;
 unsigned short byte_count = UPP_BUFF_SIZE, line_count = 1; 	// max value for both is 64*1024-1
 volatile unsigned int upp_int_status = 0;
 volatile Bool uppFull;
-static volatile unsigned int upp_isr_count = 0;
 volatile Bool modulesEnabled;
 
 //volatile unsigned int pins_reg = 0, pins_reg_prev = 0;
@@ -162,7 +162,7 @@ volatile uint8_t stb[STB_PINS_COUNT];
 //int check_stb();
 
 
-volatile uint8_t tmpb;
+//volatile uint8_t tmpb;
 
 unsigned char *upp_buffer;
 unsigned char upp_buffer_page1[UPP_BUFF_SIZE]; 				// буфер, куда передаются данные ЯМР (из АЦП) по быстрому каналу UPP (страница 1)
@@ -235,6 +235,16 @@ float*ptr_data_sum; 										// указатель на буфер data_sum
 OutBuffer *output_data; 									// контейнер выходных данных для последующей записи в data_fin и передачи в рабочую станцию оператора
 SummationBuffer *summ_data; 								// контейнер для хранения данных, получаемых поточечно (т.е. по одной точке с каждого эхо)
 
+// Structure for debugging
+/*
+typedef struct
+{
+	uint32_t state[1000];
+	uint32_t value[1000];
+	uint32_t count;
+} AppCounter;
+AppCounter app_logger;
+*/
 //----------------------------------------------
 
 // ************ Clocker Objects ******************
@@ -244,7 +254,6 @@ Clocker *clocker1; 											// Clocker for incoming UART messages (for header 
 Clocker *clocker2; 											// Clocker for incoming UART messages (for body of message)
 Clocker *clocker3; 											// Clocker for "Data_ready" message
 Clocker *clocker4; 											// Clocker for telemetry measurements
-Clocker *clocker5; 											// Clocker for SDSP measurements (~200 ms)
 // ***********************************************
 
 volatile int uartStatus;
@@ -332,11 +341,9 @@ clock_t t_start, t_stop, t_overhead;
 TimingProc_Buffer timing_buffer;
 #endif
 
-uint8_t free_test[100];
-int free_index = 0;
-
 Data_Cmd *instr = 0;
 
+volatile unsigned int tm = 0;
 
 // Start Program **************************************************************
 void main(void)
@@ -359,7 +366,8 @@ void main(void)
 	//_enable_interrupts(); // ??? should be _disable_interrupts(); I think??? (aivanov)
 
 	// Timer initialization ---------------------------------------------------
-	timerSettings.freq = 240000u;
+	timerSettings.freq = 120000u;
+	//timerSettings.freq = 24000u;
 	timerSettings.enabled = False;
 
 	tmrRegs = tmr0Regs; 									// add Timer0 to application
@@ -460,13 +468,17 @@ void main(void)
 
 
 	// Enable all Interrupts --------------------------------------------------
+	int int_count = 4;
 	int *INTCs = (int*) calloc(5, sizeof(int));
 	INTCs[0] = INTC_Timer; 					// int 4 added for Timer0
 	INTCs[1] = INTC_UART; 					// int 5 added for Logging UART
 	INTCs[2] = INTC_UPP; 					// int 6 added for UPP
 	INTCs[3] = INTC_GPIO; 					// int 7 added for GPIO
+#ifdef USE_TELEMETRIC_UART
 	INTCs[4] = INTC_UART_Tele; 				// int 8 added for Telemetric UART
-	enable_all_INTC(5, INTCs);													printf("All interrupts were enabled.\n");
+	int_count++;
+#endif
+	enable_all_INTC(int_count, INTCs);											printf("All interrupts were enabled.\n");
 	// ------------------------------------------------------------------------
 
 
@@ -492,6 +504,7 @@ void main(void)
 
 
 	// Set temperature Mode ---------------------------------------------------
+#ifdef USE_TELEMETRIC_UART
 	proger_stop();
 	device_serial = proger_rd_device_serial();
 	initDeviceSettings(device_serial);
@@ -505,6 +518,7 @@ void main(void)
 	}
 
 	temperature_mode = TEMP_MODE_SPVP;		// temporary !!!
+#endif
 
 	main_proger_wr_pulseprog_default();
 	// ------------------------------------------------------------------------
@@ -648,42 +662,69 @@ void main(void)
 
 	startClocker(clocker3);
 	startClocker(clocker4);
+#ifdef USE_TELEMETRIC_UART
 	telemetry_ready = TELE_NOT_READY;
+#endif
 #ifdef USE_PRESSURE_UNIT
 	press_unit_ready = PRESS_UNIT_NOT_READY;
 	press_unit_data = 0;
 #endif
 
-	volatile int soft_echo_counter = 0;
-	volatile int hard_echo_counter = 0;
+	//volatile int soft_echo_counter = 0;
+	//volatile int hard_echo_counter = 0;
 
-	volatile int error_echo_counter = 0;
-	volatile int recievied_adc_points_count = 0xFFFFFFFF;
-	volatile int hard_adc_points_counter = 0;
+	//volatile int error_echo_counter = 0;
+	//volatile int recievied_adc_points_count = 0xFFFFFFFF;
+	//volatile int hard_adc_points_counter = 0;
 
-	volatile int launch_counter = 0;
-	uint16_t soft_arr[NMR_DATA_LEN];
-	uint16_t hard_arr[NMR_DATA_LEN];
-	memset(&soft_arr[0], 0x0, 400 * sizeof(uint16_t));
-	memset(&hard_arr[0], 0x0, 400 * sizeof(uint16_t));
+	//volatile int launch_counter = 0;
 
 	fpga_prg_started = False;
 
 	enable_Timer(tmrRegs);														printf("System timer was enabled.\n");
 
+	// Reset OneWire sensors (temperature)
+	setOneWire();
+
 	// Start main loop --------------------------------------------------------
 	printf("Start!\n");
 
-	//int proc_samples[20];
-	//int samples_counter = 0;
-	//memset(&proc_samples[0], 0x00, 100*sizeof(int));
-	tmpb = 0;
+	// Structure for debugging
+	//app_logger.count = 0;
+	//memset(&app_logger.state[0], 0x00, 1000*sizeof(uint32_t));
+	//memset(&app_logger.value[0], 0x00, 1000*sizeof(uint32_t));
 
-	/*TSCL = 0;
-	TSCH = 0;
-	tsch = TSCH;
-	tscl = TSCL;
-	time_shift = (tsch << 32) | tscl;*/
+	/*
+	uint8_t test_data[100];
+	for (i = 0; i < 100; i++) test_data[i] = i % 11;
+	uint8_t pack_data[200];
+	memset(&pack_data[0], 0x00, 200);
+	uint8_t pk_len = 200;
+	uint8_t bk_len = 20;
+	uint8_t pk_number = 1;
+	uint16_t *pos = (uint16_t*)malloc(sizeof(uint16_t));
+	*pos = 0;
+
+	uint16_t dpos = 0;
+	while (dpos < 100)
+	{
+		MsgPacket* pack = (MsgPacket*) malloc(sizeof(MsgPacket));
+		clearMsgPacket(pack);
+		pack->pack_len = pk_len;
+		pack->block_len = bk_len;
+		pack->msg_id = 1;
+		pack->packet_number = pk_number;
+		pack->rec_errs = gf_data->index_body + 1; // index_body есть степень полинома. Кол-во исправляемых ошибок = index_body+1
+		pack->start_marker = MTYPE_PACKET;
+
+		pushDataToMsgPacket(&test_data[0], 100, pos, pack, gf_data);
+
+		pk_number++;
+		dpos = *pos;
+
+		memcpy(&pack_data[0], pack->data, pack->data_len*sizeof(uint8_t));
+	}
+	*/
 
 	while (app_finish == 0)
 	{
@@ -710,7 +751,7 @@ void main(void)
 
 		if (tool_state == READY) // прибор готов к приему/передаче данных по кабелю (получен сигнал GP0[3] "up")
 		{
-			//_disable_interrupts();		// commented 12.10.2020
+			_disable_interrupts();		// commented 12.10.2020
 			QUEUE8_clear(uart_queue);
 			QUEUE8_clear(head_q);
 			BUFFER8_clear(body_q);
@@ -720,26 +761,9 @@ void main(void)
 			msg_header_state = NOT_DEFINED;
 			incom_msg_state = NOT_DEFINED;
 			tool_state = FREE;
-			//_enable_interrupts();			// commented 12.10.2020
+			_enable_interrupts();			// commented 12.10.2020
 
-			//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
-			//memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
 
-			//processed_data_sample = 0;
-			//ds_proc_data_index = 0;
-
-			/*
-			samples_counter++;
-			if (samples_counter == 20)
-			{
-				for (i = 0; i < 20; i++)
-				{
-					printf("Echoes were preprocessed: %i\n", proc_samples[i]);
-					proc_samples[i] = 0;
-				}
-				samples_counter = 0;
-			}
-			*/
 
 #ifdef USE_TELEMETRIC_UART
 			if (telemetry_ready == TELE_NOT_READY)
@@ -773,13 +797,6 @@ void main(void)
 			pp_is_seq_done = proger_is_seq_done();
 			uint8_t out_mask = pg | (tele_flag << 1) | (pp_is_started << 2) | (pp_is_seq_done << 3);
 			sendByteArray(NMRTool_Ready[out_mask], SRV_MSG_LEN + 2, uartRegs);
-
-			if (timerSettings.enabled == False)
-			{
-				timerSettings.enabled = True;
-				enable_Timer(tmrRegs);
-			}
-
 		}
 		else if (tool_state == NOT_READY) // прибор завершил сеанс приема/передачи данных по кабелю (получен сигнал GP0[3] "down")
 		{
@@ -795,8 +812,6 @@ void main(void)
 			clearDataSamples();
 			clearDataHeap();
 
-			soft_echo_counter = 0;
-			error_echo_counter = 0;
 			tool_state = BUSY;
 			outcom_msg_state = NOT_BUILT;
 
@@ -804,13 +819,7 @@ void main(void)
 
 			//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 			memset(upp_buffer, 0x0, UPP_BUFF_SIZE);
-			upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
-
-			if (timerSettings.enabled == True)
-			{
-				timerSettings.enabled = False;
-				disable_Timer(tmrRegs);
-			}
+			//upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
 		}
 
 		if (tool_state == BUSY) // прибор не доступен для приема/передачи данных по кабелю (находится в состоянии приема и обработки данных ЯМР, GP0[3] = "down")
@@ -820,11 +829,7 @@ void main(void)
 
 		if (tool_state == FREE) // прибор находится в состоянии приема/передачи данных по кабелю (GP0[3] = "up")
 		{
-			if (timerSettings.enabled == False)
-			{
-				timerSettings.enabled = True;
-				enable_Timer(tmrRegs);
-			}
+
 		}
 
 		// если incom_msg_state == NOT_DEFINED или STARTED
@@ -832,10 +837,10 @@ void main(void)
 		{
 			if (!dataUnavailable)
 			{
-				//_disable_interrupts();			// commented 12.10.2020
+				_disable_interrupts();			// commented 12.10.2020
 				dataUnavailable = True;
 				onDataAvailable(uart_queue);
-				//_enable_interrupts();				// commented 12.10.2020
+				_enable_interrupts();				// commented 12.10.2020
 			}
 		}
 		else if (incom_msg_state == FINISHED)
@@ -843,11 +848,11 @@ void main(void)
 			// если заголовок служебного сообщения (а значит и все служебное сообщение) успешно принят и декодирован
 			if (in_msg_header->msg_type == MTYPE_SERVICE)
 			{
-				//_disable_interrupts();			// commented 12.10.2020
+				_disable_interrupts();			// commented 12.10.2020
 				QUEUE8_clear(uart_queue);
 				QUEUE8_clear(head_q);
 				BUFFER8_clear(body_q);
-				//_enable_interrupts();				// commented 12.10.2020
+				_enable_interrupts();				// commented 12.10.2020
 
 				executeServiceMsg(in_msg_header);
 
@@ -860,11 +865,11 @@ void main(void)
 			// если заголовок короткого сообщения (а значит и все короткое сообщение) успешно принят и декодирован
 			else if (in_msg_header->msg_type == MTYPE_SHORT)
 			{
-				//_disable_interrupts();			// commented 12.10.2020
+				_disable_interrupts();			// commented 12.10.2020
 				QUEUE8_clear(uart_queue);
 				QUEUE8_clear(head_q);
 				BUFFER8_clear(body_q);
-				//_enable_interrupts();				// commented 12.10.2020
+				_enable_interrupts();				// commented 12.10.2020
 
 				executeShortMsg(in_msg_header);
 
@@ -875,11 +880,11 @@ void main(void)
 			// если успешно принят и декодирован заголовок многопакетного сообщения
 			else if (in_msg_header->msg_type == MTYPE_MULTYPACK)
 			{
-				//_disable_interrupts();			// commented 12.10.2020
+				_disable_interrupts();			// commented 12.10.2020
 				QUEUE8_clear(uart_queue);
 				QUEUE8_clear(head_q);
 				BUFFER8_clear(body_q);
-				//_enable_interrupts();				// commented 12.10.2020
+				_enable_interrupts();				// commented 12.10.2020
 
 				stopClocker(clocker2);
 
@@ -904,26 +909,26 @@ void main(void)
 		{
 			if (!dataUnavailable)
 			{
-				//_disable_interrupts();			// commented 12.10.2020
+				_disable_interrupts();			// commented 12.10.2020
 				dataUnavailable = True;
 				onDataAvailable(uart_queue);
-				//_enable_interrupts();				// commented 12.10.2020
+				_enable_interrupts();				// commented 12.10.2020
 			}
 		}
 		// если incom_msg_state = FAILED или incom_msg_state = TIMED_OUT
 		else if (incom_msg_state == FAILED || incom_msg_state == TIMED_OUT)
 		{
-			if (tmpb == 1) requestLastMsg();
-			tmpb = 0;
+			//if (tmpb == 1) requestLastMsg();
+			//tmpb = 0;
 
-			//_disable_interrupts();				// commented 12.10.2020
+			_disable_interrupts();				// commented 12.10.2020
 			clearMsgHeader(in_msg_header);
 			QUEUE8_clear(uart_queue);
 			QUEUE8_clear(head_q);
 			BUFFER8_clear(body_q);
 			msg_header_state = NOT_DEFINED;
 			incom_msg_state = NOT_DEFINED;
-			//_enable_interrupts();					// commented 12.10.2020
+			_enable_interrupts();					// commented 12.10.2020
 		}
 
 		//uint8_t pp_is_started  = proger_is_started();
@@ -938,10 +943,6 @@ void main(void)
 				fpga_prg_started = False;
 				//proger_stop();		// check it ! // эта комманда приведет к сбросу флажка proger_is_seq_done() в ноль.
 													  //Включение/выключение этой команды может сильно сказаться на работоспособности ЯМР-Керн в части определения конца последовательности
-
-				timerSettings.enabled = True;
-				enable_Timer(tmrRegs);
-
 				startClocker(clocker3);
 				startClocker(clocker4);
 				incom_msg_state = NOT_DEFINED;
@@ -951,8 +952,6 @@ void main(void)
 	// ------------------------------------------------------------------------
 
 	disable_Timer(tmrRegs);
-
-	//_disable_interrupts();					// commented 12.10.2020
 
 	// Finish...
 	printf("End of NMR_Tool.\n\n");
@@ -1007,6 +1006,13 @@ void onDataAvailable(QUEUE8* bytes)
 
 			if (incom_msg_state == STARTED && sz == HEADER_LEN)
 			{
+				/*
+				app_logger.state[app_logger.count] = 1;
+				if (app_logger.count == 0) app_logger.value[0] = 1;
+				else app_logger.value[app_logger.count] = app_logger.value[app_logger.count-1]+1;
+				app_logger.count++;
+				*/
+
 				while (sz-- > 0) QUEUE8_put(QUEUE8_get(bytes), head_q);
 
 				int res = findMsgHeader(head_q, in_msg_header, gf_data);
@@ -1042,12 +1048,7 @@ void onDataAvailable(QUEUE8* bytes)
 					stopClocker(clocker1);
 					return;
 				}
-				else if (res == E_RS_NOTFOUND)
-				{
-					msg_header_state = FAILED;
-					incom_msg_state = FAILED;
-				}
-				else if (res == E_RS_LEN)
+				else
 				{
 					msg_header_state = FAILED;
 					incom_msg_state = FAILED;
@@ -1057,7 +1058,7 @@ void onDataAvailable(QUEUE8* bytes)
 				//clearMsgHeader(in_msg_header);
 				//msg_header_state = NOT_DEFINED;
 			}
-			else if (msg_header_state == NOT_DEFINED && sz > 1)
+			else if (msg_header_state == NOT_DEFINED && sz > HEADER_LEN)
 			{
 				QUEUE8_clear(bytes);
 			}
@@ -1134,6 +1135,12 @@ void onDataAvailable(QUEUE8* bytes)
 
 void executeServiceMsg(MsgHeader *_msg_header)
 {
+	/*
+	app_logger.state[app_logger.count] = 6;
+	app_logger.value[app_logger.count] = app_logger.value[app_logger.count-1];
+	app_logger.count++;
+	*/
+
 	sendServiceMsg(_msg_header, uartRegs);
 }
 
@@ -1145,9 +1152,21 @@ void executeShortMsg(MsgHeader *_msg_header)
 	{
 	case GET_DATA:
 	{
+		/*
+		app_logger.state[app_logger.count] = 5;
+		app_logger.value[app_logger.count] = app_logger.value[app_logger.count-1];
+		app_logger.count++;
+		*/
+
 		if (tool_state == UNKNOWN_STATE) return;
+
 		//if (fpga_prg_started == False && UART_telemetric_counter % TELEMETRIC_DATA_LEN > 0) return;
-		if (temperature_mode == TEMP_MODE_SPVP && fpga_prg_started == False && telemetry_ready == TELE_NOT_READY) return;
+#ifdef USE_TELEMETRIC_UART
+		//if (temperature_mode == TEMP_MODE_SPVP && fpga_prg_started == False && telemetry_ready == TELE_NOT_READY) return;
+#endif
+#ifndef USE_TELEMETRIC_UART
+		if (fpga_prg_started == False) return;
+#endif
 
 		Bool to_out = (fpga_prg_started == False);
 #ifdef USE_TELEMETRIC_UART
@@ -1173,6 +1192,7 @@ void executeShortMsg(MsgHeader *_msg_header)
 
 		//printf("Get Data !\n");
 
+
 		MsgHeader *hdr = out_msg.msg_header;
 		hdr->msg_type = MTYPE_MULTYPACK;
 		hdr->reader = PC_MAIN;
@@ -1192,11 +1212,11 @@ void executeShortMsg(MsgHeader *_msg_header)
 		setupDDR2Cache();
 		enableCacheL1();
 
+
 #ifdef USE_TELEMETRIC_UART
 		if (telemetry_ready == TELE_READY)
 		{
 			telemetryDataToOutput(output_data);
-			//printf("Telemetry is ready!\n");
 		}
 #endif
 #ifdef USE_PRESSURE_UNIT
@@ -1206,7 +1226,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 		}
 #endif
 
-		//telemetryDataToOutput(output_data);
 		summationDataToOutput(output_data, summ_data);
 		prepareOutputByteArray(output_data, summ_data);
 
@@ -1230,7 +1249,12 @@ void executeShortMsg(MsgHeader *_msg_header)
 			pack->rec_errs = gf_data->index_body + 1; // index_body есть степень полинома. Кол-во исправляемых ошибок = index_body+1
 			pack->start_marker = MTYPE_PACKET;
 
+			//proger_restart_time_counter();
+
 			pushDataToMsgPacket(&data_fin[0], data_fin_counter + 3, pos, pack, gf_data);
+
+			//tm = proger_read_time_counter();
+			//tm /= 100;
 
 			out_msg.msg_packs[pack_number - 1] = pack;
 			out_msg.pack_cnt = pack_number;
@@ -1248,6 +1272,12 @@ void executeShortMsg(MsgHeader *_msg_header)
 	}
 	case HEADER_OK:
 	{
+		/*
+		app_logger.state[app_logger.count] = 4;
+		app_logger.value[app_logger.count] = app_logger.value[app_logger.count-1];
+		app_logger.count++;
+		*/
+
 		if (outcom_msg_state == HEADER_SENT)
 		{
 			sendMultyPackMsg(&out_msg, uartRegs);
@@ -1272,9 +1302,13 @@ void executeShortMsg(MsgHeader *_msg_header)
 
 		clearMsgHeader(out_msg.msg_header);
 
-		timerSettings.enabled = True;
-		enable_Timer(tmrRegs);
+		/*
+		app_logger.state[app_logger.count] = 2;
+		app_logger.value[app_logger.count] = app_logger.value[app_logger.count-1];
+		app_logger.count++;
+		*/
 
+		setOneWire();
 		proger_stop();
 
 		break;
@@ -1297,9 +1331,13 @@ void executeShortMsg(MsgHeader *_msg_header)
 
 			clearMsgHeader(out_msg.msg_header);
 
-			timerSettings.enabled = True;
-			enable_Timer(tmrRegs);
+			/*
+			app_logger.state[app_logger.count] = 3;
+			app_logger.value[app_logger.count] = app_logger.value[app_logger.count-1];
+			app_logger.count++;
+			*/
 
+			setOneWire();
 			proger_stop();
 
 			break;
@@ -1330,9 +1368,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 		//upp_reset_soft(); // перезапуск DMA, чтобы не дописывались данные в upp_buffer в процессе обработки
 		//upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
 
-		timerSettings.enabled = False;
-		disable_Timer(tmrRegs);
-
 		proger_start();
 
 		break;
@@ -1355,9 +1390,6 @@ void executeShortMsg(MsgHeader *_msg_header)
 
 		//tool_state = UNKNOWN_STATE;	// commented 16.03.2016
 		proger_stop();
-
-		timerSettings.enabled = True;
-		enable_Timer(tmrRegs);
 
 		startClocker(clocker3);
 		startClocker(clocker4);		// added 16.08.2017
@@ -1687,7 +1719,7 @@ void responseMultypackHeader(MsgHeader *_msg_header)
 	outcom_msg_state = MESSAGE_SENT;
 }
 
-
+/*
 void requestLastMsg()
 {
 	Bool wasMsgLost = False;
@@ -1757,6 +1789,7 @@ void requestLastMsg()
 
 	stopClocker(clocker1);
 }
+*/
 
 void create_Clockers(void)
 {
@@ -1771,27 +1804,22 @@ void create_Clockers(void)
 	// create UART message clockers (for header trapping)
 	clocker1 = (Clocker*) malloc(sizeof(Clocker));
 	clockers[1] = clocker1;
-	initClocker(300, clocker1_ISR, clocker1); // it was 20
+	initClocker(1000, clocker1_ISR, clocker1); // it was 20
 
 	// create UART message clockers (for packet trapping)
 	clocker2 = (Clocker*) malloc(sizeof(Clocker));
 	clockers[2] = clocker2;
-	initClocker(1000, clocker2_ISR, clocker2); // it was 120
+	initClocker(2000, clocker2_ISR, clocker2); // it was 120
 
 	// create clocker for repetition time tests (delay between pulse sequences)
 	clocker3 = (Clocker*) malloc(sizeof(Clocker));
 	clockers[3] = clocker3;
-	initClocker(1000, clocker3_ISR, clocker3);
+	initClocker(500, clocker3_ISR, clocker3);
 
 	// create clocker for telemetry measurements (delay between measurements)
 	clocker4 = (Clocker*) malloc(sizeof(Clocker));
 	clockers[4] = clocker4;
 	initClocker(3000, clocker4_ISR, clocker4);
-
-	// create clocker for SDSP measurements (delay for measurements)
-	clocker5 = (Clocker*) malloc(sizeof(Clocker));
-	clockers[5] = clocker5;
-	initClocker(200, clocker5_ISR, clocker5);
 
 	startClocker(app_clocker);
 	// ******************************************
@@ -1895,7 +1923,6 @@ interrupt void TIMER0_12_isr(void)
 	uint64_t cur_tsc = 0;
 	cur_tsc = (((cur_tsc | tsch) << 32) | tscl) - time_shift;
 	times[counter] = (uint32_t)(cur_tsc / 300);
-
 	counter++;
 	if(counter == 999)
 	{
@@ -1929,8 +1956,15 @@ interrupt void UART_isr(void)
 					msg_header_state = STARTED;
 					flag = True;
 					startClocker(clocker1);
+
+					/*
+					app_logger.state[app_logger.count] = 100;
+					if (app_logger.count == 0) app_logger.value[0] = 1;
+					else app_logger.value[app_logger.count] = app_logger.value[app_logger.count-1]+1;
+					app_logger.count++;
+					*/
 				}
-				if (byte == STOP_BYTE)		// иногда ловится только последний байт сообщения
+				else if ((byte == STOP_BYTE) && (QUEUE8_count(uart_queue) == 0))		// иногда ловится только последний байт сообщения
 				{
 					flag = True;
 				}
@@ -1944,16 +1978,21 @@ interrupt void UART_isr(void)
 					{
 						incom_msg_state = STARTED;
 						flag = True;
+						/*
+						app_logger.state[app_logger.count] = 10;
+						if (app_logger.count == 0) app_logger.value[0] = 1;
+						else app_logger.value[app_logger.count] = app_logger.value[app_logger.count-1]+1;
+						app_logger.count++;
+						*/
 					}
 				}
 			}
 			// ------------------------------------
 
 			if (flag == False) QUEUE8_put(byte, uart_queue);
-
-			//cnt_uart_isr++;
+			dataUnavailable = FALSE;
 		}
-		dataUnavailable = FALSE;
+
 	}
 	else if (uartStatus == E_TRAN_BUF_EMPTY) transmitterFull = FALSE;
 }
@@ -1961,8 +2000,6 @@ interrupt void UART_isr(void)
 
 interrupt void upp_isr(void)
 {
-	upp_isr_count++;
-
 	// Determine Pending Interrupt
 	upp_int_status = UPP0Regs->UPISR;
 
@@ -2023,6 +2060,9 @@ interrupt void GPIO_isr(void)
 
 				ds_new_data_enabled = 0;
 
+				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
+				dummyDelay(2);
+
 				int upp_data_len = proger_rd_adc_points_count();
 				int upp_echo_number = proger_rd_echo_count();
 
@@ -2041,16 +2081,13 @@ interrupt void GPIO_isr(void)
 					memcpy(data_samples[current_data_sample]->data_ptr, upp_buffer, upp_data_len*sizeof(uint8_t));
 					disableCache();
 
-					//processing_params->channel_id = channel_id;
-					//processing_params->current_echo = upp_echo_number;
-					//processing_params->points_count = upp_data_len;
-
 					current_data_sample++;
 				}
 
-				ds_new_data_enabled = 1;	// поступили новые данные
-
 				upp_start(byte_count, line_count, upp_buffer); // старт UPP канала для приема новых данных ЯМР
+				memset(upp_buffer, 0x00, UPP_BUFF_SIZE);
+
+				ds_new_data_enabled = 1;	// поступили новые данные
 
 				break;
 			}
@@ -2072,14 +2109,29 @@ interrupt void GPIO_isr(void)
 			}
 			case GAMMA_TOOL:
 			{
+				ds_new_data_enabled = 0;
+
+				data_samples[current_data_sample]->tool_id = device_id;
+				data_samples[current_data_sample]->channel_id = channel_id;
+				data_samples[current_data_sample]->data_len = 0;
+				data_samples[current_data_sample]->echo_number = 0;
+				data_samples[current_data_sample]->proc_id = pins_cmd;
+				data_samples[current_data_sample]->data_ptr = NULL;
+
+				current_data_sample++;
+				ds_new_data_enabled = 1;	// поступили новые данные
+
+				/*
 				int proc_index = pins_cmd;
 				if (proc_index < MAX_PROCS)
 				{
 					move_ToFirstDataProcCmd(proc_index - 1, instr_prg);
-					//executeProcPack(instr_prg, proc_index - 1);
+					executeProcPack(instr_prg, proc_index - 1);
 				}
 
 				device_id = 0; 				// No device
+				*/
+
 				break;
 			}
 			default:
@@ -2114,7 +2166,6 @@ interrupt void GPIO_isr(void)
 		}
 		else if (pin3_state == 0)
 		{
-
 			current_data_sample = 0;
 			processed_data_sample = 0;
 			samples_buffer_pos = 0;
@@ -2166,7 +2217,11 @@ interrupt void UART_Telemitric_isr(void)
 		}
 		else if (temperature_mode == TEMP_MODE_SPVP)
 		{
-			if (temp_request_mode == TEMP_NOT_DEFINED && byte == 1)
+			if (temp_request_mode == TEMP_RESET && byte == 1)
+			{
+				temp_request_mode == TEMP_NOT_DEFINED;
+			}
+			else if (temp_request_mode == TEMP_NOT_DEFINED && byte == 1)
 			{
 				dummyDelay(1000);
 				CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
@@ -2234,8 +2289,7 @@ void clocker1_ISR(void)
 
 	if (QUEUE8_count(uart_queue) > 0)
 	{
-		tmpb = 1;
-		//requestLastMsg();
+		//tmpb = 1;
 	}
 }
 
@@ -2310,10 +2364,6 @@ void clocker4_ISR(void)
 	startClocker(clocker4);
 }
 
-void clocker5_ISR(void)
-{
-
-}
 
 void sendServiceMsg(MsgHeader *_msg_header, CSL_UartRegsOvly uartRegs)
 {
@@ -2892,8 +2942,9 @@ void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 		}
 		case DT_T:
 		{
-			uint8_t temp[100];
-			memcpy(&temp[0], out_buff->out_data, 100);
+#ifdef USE_TELEMETRIC_UART
+			//uint8_t temp[100];
+			//memcpy(&temp[0], out_buff->out_data, 100);
 			if (temperature_mode != TEMP_MODE_SPVP) return;
 			data_fin[index++] = (uint8_t) data_id;
 			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
@@ -2912,11 +2963,12 @@ void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 			if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
 
 			data_fin_counter = index;
-
+#endif
 			break;
 		}
 		case DT_U:
 		{
+#ifdef USE_TELEMETRIC_UART
 			if (temperature_mode != TEMP_MODE_SPVP) return;
 			data_fin[index++] = (uint8_t) data_id;
 			data_fin[index++] = (uint8_t) (group_index & 0x00FF);
@@ -2934,7 +2986,7 @@ void prepareOutputByteArray(OutBuffer *out_buff, SummationBuffer *sum_buff)
 			if (outdata_count > 1 && i < outdata_count - 1) data_fin[index++] = 0xFF;
 
 			data_fin_counter = index;
-
+#endif
 			break;
 		}
 		default: break;
@@ -3027,46 +3079,23 @@ void executeProcPack(Data_Proc *proc, DataSample *ds)
 		return;
 	}
 
+	volatile unsigned int tm;
 	while (next_DataProcCmd(index, proc, instr) == True)
 	{
 		switch (instr->cmd)
 		{
 		case INS_WIN_TIME:		setWinFuncParamsPro(instr, TIME_DOMAIN_DATA, processing_params);	break;
 		case INS_WIN_FREQ:		setWinFuncParamsPro(instr, FREQ_DATA, processing_params);	break;
-		/*
-		case INS_GET_GAMMA:
-		{
-			uint32_t gamma_counts = proger_rd_gamma_count();
+		case INS_GET_GAMMA:		getGammaData(ds, instr, output_data); break;
+		case INS_KPMG_PREPROCESS:	data_preprocessing_kpmg(ds, data_heap_samples[ds->echo_number-1], ptr_temp_data, instr); break;
+		case INS_KPMG_PROCESS:
+			//proger_restart_time_counter();
+			data_processing_kpmg(ds, data_heap_samples, instr, bank, rad, processing_params, output_data);
+			//proger_restart_time_counter();
+			//tm = proger_read_time_counter();
 
-			float *XX = 0;
-			int num = instr->params[0];
-			switch (num)
-			{
-			case X0:	XX = &summ_data->xx[0];	break;
-			case X1:	XX = &summ_data->xx[1];	break;
-			case X2:	XX = &summ_data->xx[2];	break;
-			case X3:	XX = &summ_data->xx[3];	break;
-			default: break;
-			}
-
-			if (XX != 0)
-			{
-				*XX = (float) gamma_counts;
-			}
+			//tm = tm/100;
 			break;
-		}
-		case INS_WR_ACC_GRIX:
-		{
-			if (instr->count != 1) break;
-			summ_data->group_index = (int) instr->params[0];
-			summ_data->channel_id = processing_params->channel_id; //proger_rd_ch_number();
-			//int data_cnt = output_data->outdata_counter;
-			//output_data->group_index[data_cnt] = (int) instr->params[0];
-			break;
-		}
-		*/
-		case INS_KPMG_PREPROCESS:		data_preprocessing_kpmg(ds, data_heap_samples[ds->echo_number], ptr_temp_data, instr); break;
-		case INS_KPMG_PROCESS:			data_processing_kpmg(ds, data_heap_samples, instr, bank, rad, processing_params, output_data); break;
 		//case INS_SGN_PROC3:			signalProcessing3(bank, data_heap, rad, instr, processing_params, summ_data, output_data); break;
 		case INS_GO_TO:
 		{
@@ -3124,6 +3153,7 @@ void clearDataHeap()
 
 void toMeasureTemperatures()
 {
+#ifdef USE_TELEMETRIC_UART
 	UART_telemetric_counter = 0;
 	UART_telemetric_pack_counter = 0;
 	telemetric_board_status = 0;
@@ -3219,6 +3249,17 @@ void toMeasureTemperatures()
 		CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
 		dummyDelay(1000);
 	}
+#endif
+}
+
+// Reset all temperature sensors
+void setOneWire()
+{
+	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 't');
+	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'd');
+	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, '0');
+	CSL_FINS(uartRegs_Telemetric->THR, UART_THR_DATA, 'n');
+	dummyDelay(100);
 }
 
 void initDeviceSettings(uint8_t device)
