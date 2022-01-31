@@ -9,8 +9,8 @@ int RS_encode(GFPoly *a, GFPoly *g, GF *gf, GFPoly *out)
 {
     if (!a) return E_RS_FATAL;
     if (!g) return E_RS_FATAL;
-    if (!a->data) return E_RS_FATAL;
-    if (!g->data) return E_RS_FATAL;
+    //if (!a->data) return E_RS_FATAL;
+    //if (!g->data) return E_RS_FATAL;
     if (a->power == NoD) return E_RS_FATAL;
     if (g->power == NoD) return E_RS_FATAL;
     if (!gf) return E_RS_FATAL;
@@ -20,8 +20,8 @@ int RS_encode(GFPoly *a, GFPoly *g, GF *gf, GFPoly *out)
     int res = GFPoly_copy(aa, a);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(q);
-        GFPoly_destroy(aa);
+        //GFPoly_destroy(q);
+        //GFPoly_destroy(aa);
         free(q);
         free(aa);
 
@@ -32,8 +32,8 @@ int RS_encode(GFPoly *a, GFPoly *g, GF *gf, GFPoly *out)
     res = GFPoly_shr(errs, aa);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(q);
-        GFPoly_destroy(aa);
+        //GFPoly_destroy(q);
+        //GFPoly_destroy(aa);
         free(q);
         free(aa);
 
@@ -45,8 +45,8 @@ int RS_encode(GFPoly *a, GFPoly *g, GF *gf, GFPoly *out)
 	//res = E_RS_FATAL;
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(q);
-        GFPoly_destroy(aa);
+        //GFPoly_destroy(q);
+        //GFPoly_destroy(aa);
         free(q);
         free(aa);
 
@@ -55,21 +55,18 @@ int RS_encode(GFPoly *a, GFPoly *g, GF *gf, GFPoly *out)
 
 	if (out->power < (g->power-1))
 	{
-		/*guint8 new_sz = g->power;
-		guint8 new_pos = g->power - out->power - 1;
-		guint8 *np = (guint8*)calloc(new_sz, sizeof(guint8));
-		memcpy(np+new_pos, out->data, (out->power+1)*sizeof(guint8));*/
-		
-		guint8 *np = (guint8*)calloc(g->power, sizeof(guint8));
-		memcpy(np, out->data, (out->power+1)*sizeof(guint8));		
+		//guint8 *np = (guint8*)calloc(g->power, sizeof(guint8));
+		//memcpy(np, out->data, (out->power+1)*sizeof(guint8));
 
-		GFPoly_destroy(out);		
-		out->data = np;
+		//GFPoly_destroy(out);
+		//out->data = np;
+
+		memset(&out->data[0], 0x00, g->power*sizeof(guint8));
 		out->power = g->power-1;		
 	}
 
-    GFPoly_destroy(q);
-    GFPoly_destroy(aa);
+    //GFPoly_destroy(q);
+    //GFPoly_destroy(aa);
     free(q);
     free(aa);
 
@@ -79,12 +76,12 @@ int RS_encode(GFPoly *a, GFPoly *g, GF *gf, GFPoly *out)
 int RS_get_syndrome(GFPoly *a, guint8 g_pow, GF *gf, GFPoly *out)
 {
     if (!a) return E_GFP_FATAL;
-    if (!a->data) return E_GFP_FATAL;
+    //if (!a->data) return E_GFP_FATAL;
     if (a->power == NoD) return E_GFP_NODATA;
     if (!gf) return E_GFP_FATAL;
 
-    out->data = (guint8*)calloc(g_pow, sizeof(guint8));
-    //memset(out->data, 0x0, (g_pow)*sizeof(guint8));
+    //out->data = (guint8*)calloc(g_pow, sizeof(guint8));
+    memset(&out->data[0], 0x00, g_pow*sizeof(guint8));
     out->power = g_pow-1;
 
     guint8 i, j;
@@ -109,7 +106,7 @@ int RS_get_syndrome(GFPoly *a, guint8 g_pow, GF *gf, GFPoly *out)
 int RS_find_locator_poly(GFPoly *syn, guint8 g_pow, GF *gf, GFPoly *out)
 {
     if (!syn) return E_GFP_FATAL;
-    if (!syn->data) return E_GFP_FATAL;
+    //if (!syn->data) return E_GFP_FATAL;
     if (!gf) return E_GFP_FATAL;
 
     GFPoly *Lmda = (GFPoly*)malloc(sizeof(GFPoly));
@@ -129,11 +126,11 @@ int RS_find_locator_poly(GFPoly *syn, guint8 g_pow, GF *gf, GFPoly *out)
     
     while (qq < t)
     {
-        guint8 i, j;
+        guint8 i;
         guint8 sum = 0;
         for (i = 0; i <= L; i++)
         {
-            sum = GF_add(sum, GF_mul(syn->data[qq-i],Lmda->data[i], gf), gf);
+            sum = GF_add(sum, GF_mul(syn->data[qq-i], Lmda->data[i], gf), gf);
         }
 
         if (sum != 0)
@@ -152,8 +149,8 @@ int RS_find_locator_poly(GFPoly *syn, guint8 g_pow, GF *gf, GFPoly *out)
                 m = qq - L;
                 L = L_t;
 
-                GFPoly_destroy(B);
-                GFPoly_destroy(B_t);
+                //GFPoly_destroy(B);
+                //GFPoly_destroy(B_t);
                 GFPoly_copy(B_t, Lmda);
 
                 guint8 invDq = GF_inv(sum, gf);
@@ -161,13 +158,13 @@ int RS_find_locator_poly(GFPoly *syn, guint8 g_pow, GF *gf, GFPoly *out)
                 GFPoly_copy(B, B_t);
             }
 
-            GFPoly_destroy(Lmda);
+            //GFPoly_destroy(Lmda);
             GFPoly_copy(Lmda, Lmda_t);
 
-            GFPoly_destroy(Lmda_t);
+            //GFPoly_destroy(Lmda_t);
             free(Lmda_t);
 
-            GFPoly_destroy(B_t);
+            //GFPoly_destroy(B_t);
             free(B_t);
         }
 
@@ -181,8 +178,8 @@ int RS_find_locator_poly(GFPoly *syn, guint8 g_pow, GF *gf, GFPoly *out)
     res = GFPoly_copy(out, Lmda);
     res = GFPoly_reduce(out);
 
-	GFPoly_destroy(Lmda);
-	GFPoly_destroy(B);
+	//GFPoly_destroy(Lmda);
+	//GFPoly_destroy(B);
 	free(Lmda);
 	free(B);
 
@@ -192,7 +189,7 @@ int RS_find_locator_poly(GFPoly *syn, guint8 g_pow, GF *gf, GFPoly *out)
 int RS_find_locators(GFPoly *a, GF *gf, GFPoly *out)
 {
     if (!a) return E_GFP_FATAL;
-    if (!a->data) return E_GFP_FATAL;
+    //if (!a->data) return E_GFP_FATAL;
     if (!gf) return E_GFP_FATAL;
     if (!out) return E_GFP_FATAL;
 
@@ -215,8 +212,8 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
 {
     if (!syn) return E_GFP_FATAL;
     if (!locs) return E_GFP_FATAL;
-    if (!syn->data) return E_GFP_FATAL;
-    if (!locs->data) return E_GFP_FATAL;
+    //if (!syn->data) return E_GFP_FATAL;
+    //if (!locs->data) return E_GFP_FATAL;
     if (syn->power == NoD) return E_GFP_NODATA;
     if (locs->power == NoD) return E_GFP_NODATA;
     if (!gf) return E_GFP_FATAL;
@@ -225,14 +222,14 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
     int res = RS_find_locators(locs, gf, Lcs);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(Lcs);
+        //GFPoly_destroy(Lcs);
         free(Lcs);
 
         return res;
     }
     if (Lcs->power == NoD)
     {
-        GFPoly_destroy(Lcs);
+        //GFPoly_destroy(Lcs);
         free(Lcs);
 
         return E_GFP_NODATA;
@@ -243,7 +240,7 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
     for (j = 0; j <= Lcs->power; j++) if (Lcs->data[j] > max) max = Lcs->data[j];
     if (max > a_pow)
     {
-        GFPoly_destroy(Lcs);
+        //GFPoly_destroy(Lcs);
         free(Lcs);
 
         return E_GFP_BADDATA;
@@ -268,8 +265,8 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
     res = GFPoly_reduce(Omega);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(Lcs);
-        GFPoly_destroy(Omega);
+        //GFPoly_destroy(Lcs);
+        //GFPoly_destroy(Omega);
         free(Lcs);
         free(Omega);
 
@@ -280,9 +277,9 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
     res = GFPoly_derivation(locs, derLc);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(Lcs);
-        GFPoly_destroy(Omega);
-        GFPoly_destroy(derLc);
+        //GFPoly_destroy(Lcs);
+        //GFPoly_destroy(Omega);
+        //GFPoly_destroy(derLc);
         free(Lcs);
         free(Omega);
         free(derLc);
@@ -296,9 +293,9 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
 
     if (a_pow < Lpow)
     {
-        GFPoly_destroy(Lcs);
-        GFPoly_destroy(Omega);
-        GFPoly_destroy(derLc);
+        //GFPoly_destroy(Lcs);
+        //GFPoly_destroy(Omega);
+        //GFPoly_destroy(derLc);
         free(Lcs);
         free(Omega);
         free(derLc);
@@ -309,9 +306,9 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
 
     if (opow == NoD)
     {
-        GFPoly_destroy(Lcs);
-        GFPoly_destroy(Omega);
-        GFPoly_destroy(derLc);
+        //GFPoly_destroy(Lcs);
+        //GFPoly_destroy(Omega);
+        //GFPoly_destroy(derLc);
         free(Lcs);
         free(Omega);
         free(derLc);
@@ -342,9 +339,9 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
 
         if (sum2 == 0)
         {
-            GFPoly_destroy(Lcs);
-            GFPoly_destroy(Omega);
-            GFPoly_destroy(derLc);
+            //GFPoly_destroy(Lcs);
+            //GFPoly_destroy(Omega);
+            //GFPoly_destroy(derLc);
             free(Lcs);
             free(Omega);
             free(derLc);
@@ -356,9 +353,9 @@ int RS_errs_recover(GFPoly *syn, GFPoly *locs, guint8 a_pow, GF *gf, GFPoly *out
         out->data[index] = rs;
     }
 
-    GFPoly_destroy(Lcs);
-    GFPoly_destroy(Omega);
-    GFPoly_destroy(derLc);
+    //GFPoly_destroy(Lcs);
+    //GFPoly_destroy(Omega);
+    //GFPoly_destroy(derLc);
     free(Lcs);
     free(Omega);
     free(derLc);
@@ -372,7 +369,7 @@ int RS_decode(GFPoly *in, GFPoly *g, GF *gf, GFPoly *out)
     int res = RS_get_syndrome(in, g->power, gf, syn);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(syn);
+        //GFPoly_destroy(syn);
         free(syn);
 
         if (res == E_GFP_FATAL) return E_RS_FATAL;
@@ -380,13 +377,14 @@ int RS_decode(GFPoly *in, GFPoly *g, GF *gf, GFPoly *out)
     }
     if (syn->power < 1) 
 	{
-		GFPoly_destroy(syn);
+		//GFPoly_destroy(syn);
 		free(syn);
 
 		return E_RS_NOTFOUND;
 	}
 	
-	out->data = (guint8*)calloc(in->power+1, sizeof(guint8));
+	//out->data = (guint8*)calloc(in->power+1, sizeof(guint8));
+    memset(&out->data[0], 0x00, (in->power+1)*sizeof(guint8));
 	out->power = in->power;
 
 	guint8 i;
@@ -394,9 +392,9 @@ int RS_decode(GFPoly *in, GFPoly *g, GF *gf, GFPoly *out)
 	for (i = 0; i <= syn->power; i++) if (syn->data[i] != 0) ok = 1;
 	if (ok == 0) 
 	{
-		memcpy(out->data, in->data, (in->power+1)*sizeof(guint8));
+		memcpy(&out->data[0], &in->data[0], (in->power+1)*sizeof(guint8));
 
-		GFPoly_destroy(syn);
+		//GFPoly_destroy(syn);
 		free(syn);
 
 		return E_RS_OK;
@@ -406,8 +404,8 @@ int RS_decode(GFPoly *in, GFPoly *g, GF *gf, GFPoly *out)
     res = RS_find_locator_poly(syn, g->power, gf, Lc);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(syn);
-        GFPoly_destroy(Lc);
+        //GFPoly_destroy(syn);
+        //GFPoly_destroy(Lc);
         free(syn);
         free(Lc);
 
@@ -419,9 +417,9 @@ int RS_decode(GFPoly *in, GFPoly *g, GF *gf, GFPoly *out)
     res = RS_find_locators(Lc, gf, locs);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(syn);
-        GFPoly_destroy(Lc);
-        GFPoly_destroy(locs);
+        //GFPoly_destroy(syn);
+        //GFPoly_destroy(Lc);
+        //GFPoly_destroy(locs);
         free(syn);
         free(Lc);
         free(locs);
@@ -434,10 +432,10 @@ int RS_decode(GFPoly *in, GFPoly *g, GF *gf, GFPoly *out)
     res = RS_errs_recover(syn, Lc, in->power, gf, E);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(syn);
-        GFPoly_destroy(Lc);
-        GFPoly_destroy(locs);
-        GFPoly_destroy(E);
+        //GFPoly_destroy(syn);
+        //GFPoly_destroy(Lc);
+        //GFPoly_destroy(locs);
+        //GFPoly_destroy(E);
         free(syn);
         free(Lc);
         free(locs);
@@ -450,10 +448,10 @@ int RS_decode(GFPoly *in, GFPoly *g, GF *gf, GFPoly *out)
     GFPoly_add_elems(in,E,gf,out);
     if (res != E_GFP_OK)
     {
-        GFPoly_destroy(syn);
-        GFPoly_destroy(Lc);
-        GFPoly_destroy(locs);
-        GFPoly_destroy(E);
+        //GFPoly_destroy(syn);
+        //GFPoly_destroy(Lc);
+        //GFPoly_destroy(locs);
+        //GFPoly_destroy(E);
         free(syn);
         free(Lc);
         free(locs);
@@ -463,10 +461,10 @@ int RS_decode(GFPoly *in, GFPoly *g, GF *gf, GFPoly *out)
         else return E_RS_NOTFOUND;
     }
 
-    GFPoly_destroy(syn);
-    GFPoly_destroy(Lc);
-    GFPoly_destroy(locs);
-    GFPoly_destroy(E);
+    //GFPoly_destroy(syn);
+    //GFPoly_destroy(Lc);
+    //GFPoly_destroy(locs);
+    //GFPoly_destroy(E);
     free(syn);
     free(Lc);
     free(locs);

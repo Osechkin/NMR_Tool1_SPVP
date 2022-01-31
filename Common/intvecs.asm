@@ -84,11 +84,11 @@ _vector0:	VEC_ENTRY _c_int00			;RESET
 _vector1:	VEC_ENTRY _vec_dummy		;NMI
 _vector2:	VEC_ENTRY _vec_dummy		;RSVD
 _vector3:	VEC_ENTRY _vec_dummy		;RSVD
-_vector4:	VEC_ENTRY _TIMER0_12_isr	;DSP Maskable INT4 : Mapped to func 'TIMER0_12_isr'
-_vector5:	VEC_ENTRY _UART_isr			;DSP Maskable INT5 : Mapped to func 'UART_isr'
-_vector6:	VEC_ENTRY _upp_isr			;DSP Maskable INT6 : Mapped to func 'upp_isr'
-_vector7:	VEC_ENTRY _GPIO_isr			;DSP Maskable INT7 : Mapped to func 'GPIO_isr'
-_vector8:	VEC_ENTRY _UART_Telemitric_isr		;DSP Maskable INT8 : Mapped to func UART_Telemitric_isr
+_vector4:	VEC_ENTRY _upp_isr			;DSP Maskable INT4 : Mapped to func 'upp_isr'
+_vector5:	VEC_ENTRY _GPIO_isr			;DSP Maskable INT5 : Mapped to func 'GPIO_isr'
+_vector6:	VEC_ENTRY _UART_isr			;DSP Maskable INT6 : Mapped to func 'UART_isr'
+_vector7:	VEC_ENTRY _UART_Telemitric_isr		;DSP Maskable INT7 : Mapped to func UART_Telemitric_isr
+_vector8:	VEC_ENTRY _TIMER0_12_isr	;DSP Maskable INT8 : Mapped to func 'TIMER0_12_isr'
 _vector9:	VEC_ENTRY _vec_dummy		;DSP Maskable INT9 : Empty
 _vector10:	VEC_ENTRY _vec_dummy		;DSP Maskable INT10: Empty
 _vector11:	VEC_ENTRY _vec_dummy		;DSP Maskable INT11: Empty

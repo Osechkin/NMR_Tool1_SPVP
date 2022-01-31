@@ -186,6 +186,56 @@ static void enable_upp_module_clocks ()
 }/* enable_upp_module_clocks */
 /*---------------------------------------------------------------------------*/
 
+static void enable_upp_module_clocks_lock ()
+{
+	modulesEnabled = FALSE;
+
+	// Ensure previous initiated transitions have finished
+	//1 if(check_psc_transition(CSL_PSC_1) == pscTimeout) return;
+	while (check_psc_transition(CSL_PSC_1) != pscTimeout);
+
+	// Enable peripherals; Initiate transition
+	CSL_FINST(psc1Regs->MDCTL[CSL_PSC_UPP], PSC_MDCTL_NEXT, ENABLE);
+	CSL_FINST(psc1Regs->PTCMD, PSC_PTCMD_GO0, SET);
+
+	// Ensure previous initiated transitions have finished
+	//if(check_psc_transition(CSL_PSC_1) == pscTimeout) return;
+	while (check_psc_transition(CSL_PSC_1) != pscTimeout);
+
+	// Ensure modules enabled
+	//if(check_psc_MDSTAT_upp(CSL_PSC_1, CSL_PSC_UPP, CSL_PSC_MDSTAT_STATE_ENABLE) == pscTimeout) return;
+	check_psc_MDSTAT_upp(CSL_PSC_1, CSL_PSC_UPP, CSL_PSC_MDSTAT_STATE_ENABLE);
+
+	modulesEnabled = TRUE;
+}/* enable_upp_module_clocks */
+/*---------------------------------------------------------------------------*/
+
+int check_psc_MDSTAT_upp (int pscController, int module, int state)
+{
+	CSL_PscRegsOvly pscRegs;
+	volatile int pscTimeoutCount;
+
+	if(pscController == CSL_PSC_0)
+		pscRegs = psc0Regs;
+	else if(pscController == CSL_PSC_1)
+		pscRegs = psc1Regs;
+	//else
+		//return pscTimeout;
+
+	// Reset the PSC Timeout Counter
+	pscTimeoutCount = 0;
+
+	// Increment the PSC Timeout Counter While the
+	// Specified Module State is Disabled
+	while((CSL_FEXT(pscRegs->MDSTAT[module], PSC_MDSTAT_STATE)
+			!= state))
+		pscTimeoutCount++;
+
+	// Return the PSC Timeout Counter
+	return pscTimeoutCount;
+} /* check_psc_MDSTAT */
+/*---------------------------------------------------------------------------*/
+
 int reset_upp ()
 {
 	int UPP_resetted = FALSE;

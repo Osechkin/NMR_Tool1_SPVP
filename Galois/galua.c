@@ -11,8 +11,6 @@
 
 #include "galua.h"
 
-#include "../proger/proger.h"
-
 
 int GF_init(guint8 _pow, GF *gf)
 {
@@ -160,7 +158,7 @@ guint8 GF_pow(guint8 pow, guint8 a, GF *gf)
 GFPoly *GFPoly_alloc()
 {	
     GFPoly *gf_poly = (GFPoly*)malloc(sizeof(GFPoly));
-    gf_poly->data = 0;
+    //gf_poly->data = 0;
     gf_poly->power = NoD;
 
     return gf_poly;
@@ -172,13 +170,13 @@ int GFPoly_init(guint8 pow, GFPoly *gf_poly)
 
     if (pow == NoD)
     {
-        gf_poly->data = 0;
+        //gf_poly->data = 0;
         gf_poly->power = NoD;
         return E_GFP_NODATA;
     }
 
-    gf_poly->data = (guint8*)calloc(pow+1, sizeof(guint8));
-    //memset(gf_poly->data, 0x0, (pow+1)*sizeof(guint8));
+    //gf_poly->data = (guint8*)calloc(pow+1, sizeof(guint8));
+    memset(&gf_poly->data[0], 0x00, (pow+1)*sizeof(guint8));
     gf_poly->power = pow;
 
     return E_GFP_OK;
@@ -190,8 +188,8 @@ int GFPoly_set(guint8* arr, guint32 len, GFPoly *gf_poly)
     if (!gf_poly) return E_GFP_FATAL;
     if (len == 0) return E_GFP_NODATA;
 
-    gf_poly->data = (guint8*)calloc(len, sizeof(guint8));
-    memcpy(gf_poly->data, arr, len*sizeof(guint8));
+    //gf_poly->data = (guint8*)calloc(len, sizeof(guint8));
+    memcpy(&gf_poly->data[0], arr, len*sizeof(guint8));
     gf_poly->power = len-1;
 
     return E_GFP_OK;
@@ -203,7 +201,7 @@ int GFPoly_set_inv(guint8* arr, guint32 len, GFPoly *gf_poly)
     if (!gf_poly) return E_GFP_FATAL;
     if (len == 0) return E_GFP_NODATA;
 
-    gf_poly->data = (guint8*)calloc(len, sizeof(guint8));
+    //gf_poly->data = (guint8*)calloc(len, sizeof(guint8));
     guint16 i;
     for (i = 0; i < len; i++) gf_poly->data[i] = arr[len-i-1];
     gf_poly->power = len-1;
@@ -214,7 +212,7 @@ int GFPoly_set_inv(guint8* arr, guint32 len, GFPoly *gf_poly)
 int GFPoly_self_inv(GFPoly *gf_poly)
 {	
 	if (!gf_poly) return E_GFP_FATAL;
-	if (!gf_poly->data) return E_GFP_FATAL;
+	//if (!gf_poly->data) return E_GFP_FATAL;
 	if (!gf_poly->power == NoD) return E_GFP_NODATA;
 
 	guint16 i;
@@ -232,10 +230,10 @@ int GFPoly_self_inv(GFPoly *gf_poly)
 void GFPoly_destroy(GFPoly* gf_poly)
 {
     if (!gf_poly) return;
-    if (!gf_poly->data) return;
+    //if (!gf_poly->data) return;
 
-    free(gf_poly->data);
-    gf_poly->data = 0;
+    //free(gf_poly->data);
+    //gf_poly->data = 0;
     gf_poly->power = NoD;
 }
 
@@ -256,7 +254,6 @@ guint8 GFPoly_deg(GFPoly *gf_poly)
 int GFPoly_add(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
 {
 	int res = GFPoly_add_elems(gfp1, gfp2, gf, dst);
-
 	if (res == E_GFP_OK) res = GFPoly_reduce(dst);
 
 	return res;
@@ -265,11 +262,11 @@ int GFPoly_add(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
 int GFPoly_add_elems(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
 {
 	if(!gfp1) return E_GFP_FATAL;
-	if (!gfp1->data) return E_GFP_FATAL;
+	//if (!gfp1->data) return E_GFP_FATAL;
 	if (gfp1->power == NoD) return E_GFP_NODATA;
 
 	if(!gfp2) return E_GFP_FATAL;
-	if (!gfp2->data) return E_GFP_FATAL;
+	//if (!gfp2->data) return E_GFP_FATAL;
 	if (gfp2->power == NoD) return E_GFP_NODATA;
 
 	if (!gf) return E_GFP_FATAL;
@@ -280,7 +277,8 @@ int GFPoly_add_elems(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
 	if (u >= v) max = u; else max = v;
 
 	if (dst->power != NoD) GFPoly_destroy(dst);
-	dst->data = (guint8*)calloc(max+1, sizeof(guint8));
+	memset(&dst->data[0], 0x00, (max+1)*sizeof(guint8));
+	//dst->data = (guint8*)calloc(max+1, sizeof(guint8));
 	dst->power = max;
 
 	guint16 i;
@@ -301,11 +299,11 @@ int GFPoly_add_elems(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
 int GFPoly_mul(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
 {
     if(!gfp1) return E_GFP_FATAL;
-    if (!gfp1->data) return E_GFP_FATAL;
+    //if (!gfp1->data) return E_GFP_FATAL;
     if (gfp1->power == NoD) return E_GFP_NODATA;
 
     if(!gfp2) return E_GFP_FATAL;
-    if (!gfp2->data) return E_GFP_FATAL;
+    //if (!gfp2->data) return E_GFP_FATAL;
     if (gfp2->power == NoD) return E_GFP_NODATA;
 
     if (!gf) return E_GFP_FATAL;
@@ -316,7 +314,8 @@ int GFPoly_mul(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
     if (uv > GF_base(gf)) return E_GFP_OVERFLOW;
 
     guint8 max = u + v;
-    dst->data = (guint8*)calloc(max+1, sizeof(guint8));
+    //dst->data = (guint8*)calloc(max+1, sizeof(guint8));
+    memset(&dst->data[0], 0x00, (max+1)*sizeof(guint8));
     dst->power = max;
 
     guint16 i, j, k;
@@ -343,7 +342,7 @@ int GFPoly_mul(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *dst)
 int GFPoly_mulN(guint8 N, GFPoly *gfp1, GF *gf)
 {
     if(!gfp1) return E_GFP_FATAL;
-    if (!gfp1->data) return E_GFP_FATAL;
+    //if (!gfp1->data) return E_GFP_FATAL;
     if (gfp1->power == NoD) return E_GFP_NODATA;
 
     if (!gf) return E_GFP_FATAL;
@@ -363,11 +362,11 @@ int GFPoly_mulN(guint8 N, GFPoly *gfp1, GF *gf)
 int GFPoly_div(GFPoly *a, GFPoly *g, GF *gf, GFPoly *q, GFPoly *r)
 {
     if (!a) return E_GFP_FATAL;
-    if (!a->data) return E_GFP_FATAL;
+    //if (!a->data) return E_GFP_FATAL;
     if (a->power < 1 || a->power == NoD) return E_GFP_NODATA;
 
     if (!g) return E_GFP_FATAL;
-    if (!g->data) return E_GFP_FATAL;
+    //if (!g->data) return E_GFP_FATAL;
     if (g->power < 1 || g->power == NoD) return E_GFP_NODATA;
 
     if (!gf) return E_GFP_FATAL;
@@ -385,17 +384,14 @@ int GFPoly_div(GFPoly *a, GFPoly *g, GF *gf, GFPoly *q, GFPoly *r)
     GFPoly_copy(q1, g);
     GFPoly_reduce(r1);
     GFPoly_reduce(q1);
-
 	while (u-m >= 0)
     {
         guint8 p = u - m;
         guint8 y = GF_div(r1->data[u], q1->data[m], gf);
 
-        proger_restart_time_counter();
 		GFPoly_shr(p, q1);
 		GFPoly_mulN(y, q1, gf);
         GFPoly_add(q1,r1,gf,r2);
-        volatile unsigned int tm = proger_read_time_counter()/100;
 
         //GFPoly_reduce(r2);
 				
@@ -412,13 +408,13 @@ int GFPoly_div(GFPoly *a, GFPoly *g, GF *gf, GFPoly *q, GFPoly *r)
     GFPoly_reduce(q2);
     GFPoly_reduce(r2);
 
-    GFPoly_set(q2->data, q2->power+1, q);
-    GFPoly_set(r2->data, r2->power+1, r);
+    GFPoly_set(&q2->data[0], q2->power+1, q);
+    GFPoly_set(&r2->data[0], r2->power+1, r);
 
-    GFPoly_destroy(r1);
-    GFPoly_destroy(r2);
-    GFPoly_destroy(q1);
-    GFPoly_destroy(q2);
+    //GFPoly_destroy(r1);
+    //GFPoly_destroy(r2);
+    //GFPoly_destroy(q1);
+    //GFPoly_destroy(q2);
     free(r1);
     free(r2);
     free(q1);
@@ -430,25 +426,9 @@ int GFPoly_div(GFPoly *a, GFPoly *g, GF *gf, GFPoly *q, GFPoly *r)
 int GFPoly_derivation(GFPoly *gfp1, GFPoly *gfp2)
 {
     if (!gfp1) return E_GFP_FATAL;
-    if (!gfp1->data) return E_GFP_FATAL;
+    //if (!gfp1->data) return E_GFP_FATAL;
     if (gfp1->power == NoD) return E_GFP_NODATA;
     if (!gfp2) return E_GFP_FATAL;
-
-    /*guint32 pow = gfp1->power;
-    GFPoly_init((pow+1)/2-1, gfp2);
-
-    if (pow == 0) return E_GFP_OK;
-    gfp2->data[0] = gfp1->data[1];
-    if (pow < 3) return E_GFP_OK;
-
-    guint32 i;
-    guint8 c = 0;
-    for (i = 3; i <= pow; i += 2)
-    {
-        c = gfp1->data[i];
-        gfp2->data[i-1] = c;
-        gfp2->data[i-2] = 0;
-    }*/
 
     guint8 tau = gfp1->power;
     GFPoly_init(tau-1,gfp2);
@@ -467,31 +447,22 @@ int GFPoly_derivation(GFPoly *gfp1, GFPoly *gfp2)
 int GFPoly_shr(guint8 N, GFPoly *gfp1)
 {
     if (!gfp1) return E_GFP_FATAL;
-    if (!gfp1->data) return E_GFP_FATAL;
+    //if (!gfp1->data) return E_GFP_FATAL;
     if (gfp1->power == NoD) return E_GFP_NODATA;
     if (N >= NoD) return E_GFP_OVERFLOW;
 
     int sz = gfp1->power+1;
     if (sz + N > NoD) return E_GFP_OVERFLOW;
 
-    /*guint8 *z;
-    z = (guint8*)calloc(sz, sizeof(guint8));
-    memcpy(z, gfp1->data, sz*sizeof(guint8));
+	//guint8 *z = (guint8*)calloc(sz+N, sizeof(guint8));
+	//memcpy(z+N, gfp1->data[0], sz*sizeof(guint8));
+	guint8 z[255];
+	memcpy(&z[0], &gfp1->data[0], sz*sizeof(guint8));
+	memset(&gfp1->data[0], 0x00, (sz+N)*sizeof(guint8));
+	memcpy(&gfp1->data[N], &z[0], sz*sizeof(guint8));
 
-    GFPoly_destroy(gfp1);
-    gfp1->data = (guint8*)calloc(sz+N, sizeof(guint8));
-    memset(gfp1->data, 0x0, N*sizeof(guint8));
-    memcpy(gfp1->data+N, z, sz*sizeof(guint8));
-    gfp1->power = sz+N-1;
-
-    free(z);*/
-
-	guint8 *z;
-	z = (guint8*)calloc(sz+N, sizeof(guint8));
-	memcpy(z+N, gfp1->data, sz*sizeof(guint8));
-
-	GFPoly_destroy(gfp1);
-	gfp1->data = z;
+	//GFPoly_destroy(gfp1);
+	//gfp1->data = z;
 	gfp1->power = sz+N-1;
 
     return E_GFP_OK;
@@ -501,12 +472,12 @@ int GFPoly_copy(GFPoly *dst, GFPoly *src)
 {
     if (!dst) return E_GFP_FATAL;
     if (!src) return E_GFP_FATAL;
-    if (!src->data) return E_GFP_FATAL;
+    //if (!src->data) return E_GFP_FATAL;
     if (src->power == NoD) return E_GFP_NODATA;
 
-	if (dst->power != NoD) GFPoly_destroy(dst);
-    GFPoly_init(src->power,dst);
-    memcpy(dst->data, src->data, (src->power+1)*sizeof(guint8));
+	//if (dst->power != NoD) GFPoly_destroy(dst);
+    GFPoly_init(src->power, dst);
+    memcpy(&dst->data[0], &src->data[0], (src->power+1)*sizeof(guint8));
     dst->power = src->power;
 
     return E_GFP_OK;
@@ -515,11 +486,11 @@ int GFPoly_copy(GFPoly *dst, GFPoly *src)
 int GFPoly_concat(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *out)
 {
     if (!gfp1) return E_GFP_FATAL;
-    if (!gfp1->data) return E_GFP_FATAL;
+    //if (!gfp1->data) return E_GFP_FATAL;
     if (gfp1->power == NoD) return E_GFP_NODATA;
 
     if (!gfp2) return E_GFP_FATAL;
-    if (!gfp2->data) return E_GFP_FATAL;
+    //if (!gfp2->data) return E_GFP_FATAL;
     if (gfp2->power == NoD) return E_GFP_NODATA;
 
     if (!out) return E_GFP_FATAL;
@@ -529,10 +500,11 @@ int GFPoly_concat(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *out)
     guint16 sum = len1 + len2;
     if (sum >= GF_base(gf)) return E_GFP_OVERFLOW;
 
-    out->data = (guint8*)calloc(sum, sizeof(guint8));
+    //out->data = (guint8*)calloc(sum, sizeof(guint8));
+    memset(&out->data[0], 0x00, sum*sizeof(guint8));
     out->power = sum-1;
-    memcpy(out->data, gfp1->data, len1*sizeof(guint8));
-    memcpy(out->data+len1, gfp2->data, len2*sizeof(guint8));
+    memcpy(&out->data[0], &gfp1->data[0], len1*sizeof(guint8));
+    memcpy(&out->data[len1], &gfp2->data[0], len2*sizeof(guint8));
 
     return E_GFP_OK;
 }
@@ -540,8 +512,11 @@ int GFPoly_concat(GFPoly *gfp1, GFPoly *gfp2, GF *gf, GFPoly *out)
 int GFPoly_reduce(GFPoly *gfp1)
 {
     if (!gfp1) return E_GFP_FATAL;
-    if (!gfp1->data) return E_GFP_FATAL;
+    //if (!gfp1->data) return E_GFP_FATAL;
     if (gfp1->power == NoD) return E_GFP_NODATA;
+
+    guint8 arr[256];
+    memcpy(&arr[0], &gfp1->data[0], (gfp1->power+1)*sizeof(guint8));
 
     guint8 hpow = NoD;
     guint16 i;
@@ -552,25 +527,30 @@ int GFPoly_reduce(GFPoly *gfp1)
     if (hpow == gfp1->power) return E_GFP_OK;
     else if (hpow == NoD)
     {
-        free(gfp1->data);
-        gfp1->data = (guint8*)calloc(1, sizeof(guint8));
+        //free(gfp1->data);
+        //gfp1->data = (guint8*)calloc(1, sizeof(guint8));
+    	memset(&gfp1->data[0], 0x00, (gfp1->power+1)*sizeof(guint8));
         gfp1->data[0] = 0;
 		gfp1->power = 0;
 
         return E_GFP_NODATA;
     }
 
-    guint16 sz = hpow+1;
-    guint8 *z;
-    z = (guint8*)calloc(sz, sizeof(guint8));
-    memcpy(z, gfp1->data, sz*sizeof(guint8));
+    //guint16 sz = hpow+1;
+    //guint8 *z;
+    //z = (guint8*)calloc(sz, sizeof(guint8));
+    //memcpy(z, gfp1->data, sz*sizeof(guint8));
 
-    GFPoly_destroy(gfp1);
-    gfp1->data = (guint8*)calloc(sz, sizeof(guint8));
-    memcpy(gfp1->data, z, sz*sizeof(guint8));
+    //GFPoly_destroy(gfp1);
+    //gfp1->data = (guint8*)calloc(sz, sizeof(guint8));
+    //memcpy(gfp1->data, z, sz*sizeof(guint8));
+    //gfp1->data[gfp1->power] = 0;
     gfp1->power = hpow;
 
-    free(z);
+    //free(z);
+
+    //guint8 res[256];
+    //memcpy(&res[0], &gfp1->data[0], (gfp1->power+1)*sizeof(guint8));
 
     return E_GFP_OK;
 }
@@ -619,9 +599,9 @@ int GFPoly_genpoly(guint8 t, GF *gf, GFPoly *gfp)
 
     GFPoly_copy(gfp,tmp1);
 
-    GFPoly_destroy(tmp1);
-    GFPoly_destroy(tmp2);
-    GFPoly_destroy(p);
+    //GFPoly_destroy(tmp1);
+    //GFPoly_destroy(tmp2);
+    //GFPoly_destroy(p);
     free(tmp1);
     free(tmp2);
     free(p);
@@ -632,7 +612,7 @@ int GFPoly_genpoly(guint8 t, GF *gf, GFPoly *gfp)
 int GFPoly_solve(GFPoly *a, GF *gf, GFPoly *out)
 {
     if (!a) return E_GFP_FATAL;
-    if (!a->data) return E_GFP_FATAL;
+    //if (!a->data) return E_GFP_FATAL;
     if (a->power == NoD) return E_GFP_NODATA;
     if (!out) return E_GFP_FATAL;
 

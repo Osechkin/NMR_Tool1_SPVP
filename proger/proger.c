@@ -72,7 +72,7 @@ unsigned int proger_read_time_counter ()
 {
 	volatile unsigned int clks;
 
-	proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x00);
+	//proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x00);
 	clks  = proger_rd_reg_32(MEM_ADDR_PIT_OUT_REG);
 	//proger_wr_reg_32 (MEM_ADDR_CTRL_REG, 0x02);
 	//clks /= 100;

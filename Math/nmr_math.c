@@ -9,6 +9,11 @@
 #include "nmr_math.h"
 #include "../common_data.h"
 
+#include "../proger/proger.h"
+
+
+static float tm_arr[1000];
+static int tm_count = 0;
 
 /*void initExpTab(void)
 {
@@ -745,6 +750,8 @@ void data_preprocessing_kpmg(DataSample *data_sample, DataHeap *data_heap_sample
 {
 	if (instr->count != 3) return;
 
+	//proger_restart_time_counter();
+
 	//clock_t t_start, t_stop, t_overhead;
 	//t_start = clock();
 	//t_stop = clock();
@@ -754,9 +761,11 @@ void data_preprocessing_kpmg(DataSample *data_sample, DataHeap *data_heap_sample
 	int mult = instr->params[1];					// параметр, на который необходимо домножить первое эхо сигнала (в дол€х от тыс€чи)
 	int NN = (int)instr->params[2];					// количество окон шума
 
+	int src_number = data_sample->echo_number;		// номер текущего эхо
 	int sn_ratio = 0;								// целое число ??? - уточнить возможность передачи числа с плавающей точкой
 	if (data_src > 0) sn_ratio = data_src;
 	float a = (float)mult/1000.0;					// параметр, на который необходимо домножать первое эхо сигнала
+	if (src_number != NN + 1) a = 1; 				// домножаетс€ на a только первое эхо сигнала
 	if (a == 0) a = 1;
 
 	int src_len = data_sample->data_len;
@@ -765,12 +774,8 @@ void data_preprocessing_kpmg(DataSample *data_sample, DataHeap *data_heap_sample
 	memset(temp_data_ptr, 0x00, NMR_DATA_LEN*sizeof(float)); // предполагаетс€ использовать data_bank[8], аллокированный в L2 кэше, в качестве временного буфера дл€ быстрых вычислений
 
 	int i;
-	int src_number = data_sample->echo_number;
-
 	// эмулировать данные шума и сигнала, если соответствующий параметр > 0
 	uint8_t *upp_data = data_sample->data_ptr;
-	//uint8_t temp[512];
-	//memcpy(&temp[0], data_sample->data_ptr, 512);
 	if (data_src > 0)
 	{
 		if (src_number <= NN)	// эмул€ци€ шума
@@ -837,6 +842,10 @@ void data_preprocessing_kpmg(DataSample *data_sample, DataHeap *data_heap_sample
 	}
 	// ------------------------------------------------------------
 
+	//volatile unsigned int tm = proger_read_time_counter()/100;
+	//tm_arr[tm_count++] = tm;
+	//if (tm_count > 250) tm_count = 0;
+
 	//t_stop = clock();
 	//printf("\t NMR data processing time: %d clock cycles\n", (t_stop - t_start) - t_overhead);
 }
@@ -864,6 +873,9 @@ void data_processing_kpmg(DataSample *ds, DataHeap **data_heap_samples, Data_Cmd
 	float *data_integrals = data_bank[1];			// array in L2-stack data1. »спользуетс€ дл€ накоплени€ интегралов эхо
 	float *temp_data = data_bank[8];
 	float *ptr_w = data_bank[9];
+
+	//float *data_2 = data_bank[2];
+	//float *data_3 = data_bank[3];
 
 	memset(data_integrals, 0x00, DATA_MAX_LEN*sizeof(float));
 	memset(data, 0x00, DATA_MAX_LEN*sizeof(float));
@@ -960,6 +972,9 @@ void data_processing_kpmg(DataSample *ds, DataHeap **data_heap_samples, Data_Cmd
 	//SNs /= NN;
 	if (cnt > 0) SNs /= cnt;
 	// --------------------------------------------------------
+
+	//memset(data_2, 0x00, DATA_MAX_LEN*sizeof(float));
+	//memset(data_3, 0x00, DATA_MAX_LEN*sizeof(float));
 
 	// --- ¬ычитание амплитуды шума ---------------------------
 	for (m = 0; m < NS; m++) data_integrals[m+NN] = (data_integrals[m+NN] - SNs)/512.0;

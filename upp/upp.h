@@ -76,6 +76,9 @@ void upp_start (unsigned short byte_count, unsigned short line_count, unsigned c
 //static void	upp_check_isr(unsigned short byte_count, unsigned short line_count);
 //static void	upp_check_rx_isr(unsigned short byte_count, unsigned short line_count);
 
+static void enable_upp_module_clocks_lock ();
+int check_psc_MDSTAT_upp (int pscController, int module, int state);
+
 //static void looopback_upp ();
 
 #endif /* UPP_H_ */

@@ -79,7 +79,8 @@ int findMsgHeader(QUEUE8 *_queue, MsgHeader *_msg_header, GF_Data *_gf_data)
 	}
 
 	GFPoly *dist = GFPoly_alloc();
-	dist->data = &arr[0];
+	//dist->data = &arr[0];
+	memcpy(&dist->data[0], &arr[0], sz*sizeof(uint8_t));
 	dist->power = sz-1;
 
 	GF *gf = _gf_data->gf;
@@ -201,13 +202,13 @@ void makeMsgHeader(MsgHeader *_msg_header, GF_Data *_gf_data)
 		arr_poly->data[5] = _msg_header->data[2];
 		arr_poly->data[6] = _msg_header->data[3];
 	}
-	arr_poly->data[7] = Crc8(arr_poly->data, HEAD_INFO_LEN - 1);
+	arr_poly->data[7] = Crc8(&arr_poly->data[0], HEAD_INFO_LEN - 1);
 
 	int g_num = _gf_data->index_hdr;
 
 	RS_encode(arr_poly, _gf_data->gf_polys[g_num], _gf_data->gf, rec_poly);
 
-	memcpy(&_msg_header->rec_data[0], rec_poly->data, HEAD_REC_LEN);
+	memcpy(&_msg_header->rec_data[0], &rec_poly->data[0], HEAD_REC_LEN);
 
 	GFPoly_destroy(arr_poly);
 	GFPoly_destroy(rec_poly);
@@ -273,7 +274,7 @@ int findMsgPackets(QUEUE8 *_queue, UART_Message *_uart_msg, GF_Data *_gf_data)
 		while (pack_byte_counter < pack_len && QUEUE8_count(_queue) > 0)
 		{
 			GFPoly *dist = GFPoly_alloc();
-			dist->data = (guint8*)calloc(block_len, sizeof(guint8));
+			//dist->data = (guint8*)calloc(block_len, sizeof(guint8));
 			uint8_t block_byte_counter = 0;
 			while (block_byte_counter < block_len && QUEUE8_count(_queue) > 0)
 			{
@@ -293,7 +294,7 @@ int findMsgPackets(QUEUE8 *_queue, UART_Message *_uart_msg, GF_Data *_gf_data)
 				if (res == E_RS_OK)
 				{
 					GFPoly_self_inv(dec);
-					memcpy(data_arr+cnt, dec->data, len*sizeof(uint8_t));
+					memcpy(data_arr+cnt, &dec->data[0], len*sizeof(uint8_t));
 					*data_cnt += len;
 				}
 				else
@@ -367,7 +368,7 @@ int findMsgPackets2(BUFFER8 *_buff, UART_Message *_uart_msg, GF_Data *_gf_data)
 		while (pack_byte_counter < pack_len && BUFFER8_count(_buff) > 0)
 		{
 			GFPoly *dist = GFPoly_alloc();
-			dist->data = (guint8*)calloc(block_len, sizeof(guint8));
+			//dist->data = (guint8*)calloc(block_len, sizeof(guint8));
 			uint8_t block_byte_counter = 0;
 			while (block_byte_counter < block_len && BUFFER8_count(_buff) > 0)
 			{
@@ -387,7 +388,7 @@ int findMsgPackets2(BUFFER8 *_buff, UART_Message *_uart_msg, GF_Data *_gf_data)
 				if (res == E_RS_OK)
 				{
 					GFPoly_self_inv(dec);
-					memcpy(data_arr+cnt, dec->data, len*sizeof(uint8_t));
+					memcpy(data_arr+cnt, &dec->data[0], len*sizeof(uint8_t));
 					*data_cnt += len;
 				}
 				else
@@ -482,7 +483,7 @@ void calcRecoveryPart(uint8_t *src, uint8_t *dst, MsgPacket *_msg_pack, GF_Data 
 	GFPoly *a = GFPoly_alloc();
 	uint8_t len = block_len-2*errs_count;
 	GFPoly_init(len-1, a);
-	memcpy(a->data, src, len*sizeof(uint8_t));
+	memcpy(&a->data[0], src, len*sizeof(uint8_t));
 	GFPoly_self_inv(a);
 
 	GFPoly *r = GFPoly_alloc();
@@ -494,7 +495,7 @@ void calcRecoveryPart(uint8_t *src, uint8_t *dst, MsgPacket *_msg_pack, GF_Data 
 
 	GFPoly_self_inv(r);
 
-	memcpy(dst, r->data, 2*errs_count*sizeof(uint8_t));
+	memcpy(dst, &r->data[0], 2*errs_count*sizeof(uint8_t));
 
 	GFPoly_destroy(a);
 	GFPoly_destroy(r);
@@ -667,7 +668,8 @@ int findMsgBody(QUEUE8 *_queue, MsgHeader *_msg_header, MsgBody *_msg_body, GF_D
 
 	GFPoly *dist = GFPoly_alloc();
 
-	dist->data = &arr[0];
+	//dist->data = &arr[0];
+	memcpy(&dist->data[0], &arr[0], sz*sizeof(uint8_t));
 	dist->power = sz-2;
 
 	GF *gf = _gf_data->gf;

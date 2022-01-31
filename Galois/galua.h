@@ -5,8 +5,8 @@
  *      Author: Osechkin
  */
 
-#ifndef GALUA_H_
-#define GALUA_H_
+#ifndef GALUA_FAST_H_
+#define GALUA_FAST_H_
 
 #include "rscoding_common.h"
 //#include "stdint.h"
@@ -21,8 +21,8 @@ typedef struct
 
 typedef struct
 {
-    guint8*   data;           // коэффициенты полинома
-    guint32   power;          // степень полинома (= число его коэффициентов-1)    
+    guint8	data[256];      // коэффициенты полинома
+    guint32	power;          // степень полинома (= число его коэффициентов-1)
 } GFPoly;
 
 
@@ -66,4 +66,4 @@ int GFPoly_solve(GFPoly *a, GF *gf, GFPoly *out);
 
 void showGFPoly(GFPoly *gfp1);
 
-#endif /* GALUA_H_ */
+#endif /* GALUA_FAST_H_ */
